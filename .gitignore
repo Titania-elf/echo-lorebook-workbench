@@ -1,0 +1,17 @@
+# Local dependencies and build caches
+node_modules/
+coverage/
+
+# Private machine/session configuration
+.claude/
+.env
+.env.*
+*.local.json
+
+# Logs and OS/editor temporary files
+*.log
+*.tmp
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

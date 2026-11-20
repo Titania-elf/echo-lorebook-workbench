@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>Extension UI Test</title>
+    <link rel="stylesheet" href="/style.css">
+    <style>
+        :root { --SmartThemeBorderColor: #666; --SmartThemeQuoteColor: #689a8a; }
+        body { margin: 16px; background: #202020; color: #eee; font: 15px system-ui; }
+        * { box-sizing: border-box; }
+        #extensions_settings2 { max-width: 340px; }
+        .text_pole { width: 100%; }
+        .menu_button { padding: 8px; }
+        pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+    </style>
+</head>
+<body>
+    <div id="extensions_settings2"></div>
+    <pre id="test-result" data-state="running">Running isolated UI tests. All data and model responses are synthetic.</pre>
+    <script type="module">
+        import { mountUI } from '/ui.js';
+        import { LorebookDirector } from '/director.js';
+        import { MODULE, settingsWithDefaults, entryId } from '/core.js';
+        const output = document.getElementById('test-result');
+        const assert = (condition, text) => { if (!condition) throw new Error(text); };
+        try {
+            const entries = [
+                { world: '测试书', uid: 1, comment: '<img src=x onerror="window.bad=true">', content: '这是测试条目。', key: ['测试'] },
+                { world: '测试书', uid: 2, comment: '历史', content: '这是另一条测试资料。', constant: true },
+            ];
+            let calls = 0;
+            const ctx = {
+                chatId: 'synthetic-chat', characterId: 0, chatMetadata: {},
+                chat: [{ is_user: true, mes: '检查测试条目。' }],
+                extensionSettings: { [MODULE]: settingsWithDefaults({ books: ['测试书'] }) },
+                getWorldInfoNames: () => ['测试书', '未挂载书'],
+                ConnectionManagerRequestService: { getSupportedProfiles: () => [{ id: 'test-profile', name: '测试连接' }] },
+                renderExtensionTemplateAsync: async () => (await fetch('/settings.html')).text(),
+                getTokenCountAsync: async () => 30, substituteParams: text => text,
+                saveSettingsDebounced() {}, saveMetadataDebounced() {},
+            };
+            const director = new LorebookDirector({
+                getContext: () => ctx, getEntries: async () => structuredClone(entries),
+                requestModel: async () => { calls++; return JSON.stringify({ scene: '测试场景', selected: [{ id: entryId(entries[0]), scope: 'scene', reason: '测试理由' }] }); },
+            });
+            await mountUI(director);
+            assert(document.querySelectorAll('.ld-entry').length === 2, 'Catalog did not render');
+            assert(!document.querySelector('.ld-entry img') && !window.bad, 'Entry text was treated as HTML');
+            assert(!document.getElementById('ld-enabled').checked, 'Must default to disabled');
+            assert(calls === 0, 'Mounting must not send model requests');
+            await director.preview();
+            assert(calls === 1 && document.getElementById('ld-result').textContent.includes('试选'), 'Preview did not render');
+            assert(!director.gate && director.state().snapshots.length === 0, 'Preview mutated live state');
+            const mode = document.querySelector('.ld-entry select');
+            mode.value = 'pin'; mode.dispatchEvent(new Event('change'));
+            assert(director.state().overrides[entryId(entries[0])] === 'pin', 'Manual override not saved');
+            const search = document.getElementById('ld-search');
+            search.value = '历史'; search.dispatchEvent(new Event('input'));
+            assert(document.querySelectorAll('.ld-entry').length === 1, 'Search did not filter');
+            search.value = ''; search.dispatchEvent(new Event('input'));
+            const limit = document.getElementById('ld-maxEntries');
+            limit.value = '3'; limit.dispatchEvent(new Event('change'));
+            assert(director.config.maxEntries === 3, 'Settings change not saved');
+            const enabled = document.getElementById('ld-enabled');
+            enabled.checked = true; enabled.dispatchEvent(new Event('change'));
+            await director.intercept(ctx.chat, 8000, () => {}, 'normal');
+            const payload = { globalLore: structuredClone(entries), chatLore: [], characterLore: [], personaLore: [] };
+            director.onEntriesLoaded(payload);
+            assert(payload.globalLore[0].constant && payload.globalLore[1].disable, 'Native scan overlay not applied');
+            director.onActivated([payload.globalLore[0]]); director.onPromptReady();
+            assert(document.querySelector('.ld-entry-reason').textContent.includes('原生已激活'), 'Native result not displayed');
+            assert(document.documentElement.scrollWidth <= document.documentElement.clientWidth, 'Narrow viewport has horizontal overflow');
+            assert(document.getElementById('ld-cancel').disabled, 'Busy state not cleared');
+            output.dataset.state = 'passed';
+            output.textContent = 'PASS: mount, default-off, text escaping, local catalog, preview isolation, manual override, search, settings, native gate, actual activation, narrow layout, cleanup. No external API calls.';
+        } catch (error) {
+            output.dataset.state = 'failed'; output.textContent = error.stack || String(error);
+        }
+    </script>
+</body>
+</html>

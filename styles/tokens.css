@@ -1,0 +1,54 @@
+@font-face {
+    font-family: "Echo Rounded";
+    src: url("../assets/echo-rounded.ttf") format("truetype");
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+}
+
+/* Shared tokens are local to the extension and its dedicated native popup. */
+:is(#lorebook-director-workbench, #lorebook-director-menu, #lorebook-director, .echo-workbench-popup) {
+    --wb-brand-a: #8360c3;
+    --wb-brand-b: #2ebf91;
+    --wb-gradient: linear-gradient(115deg, var(--wb-brand-a), var(--wb-brand-b));
+    --wb-title-font: "Echo Rounded", "YouYuan", "Hiragino Maru Gothic ProN", "PingFang SC", "Microsoft YaHei", sans-serif;
+    --wb-body-font: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+
+    /* An unset theme follows the real tavern palette, never an OS preference. */
+    --wb-bg: var(--SmartThemeBlurTintColor, #f5f5f7);
+    --wb-surface: var(--SmartThemeBlurTintColor, #ffffff);
+    --wb-text: var(--SmartThemeBodyColor, #28272e);
+    --wb-muted: var(--SmartThemeEmColor, #696672);
+    --wb-border: var(--SmartThemeBorderColor, #dcdce3);
+    --wb-soft: color-mix(in srgb, var(--wb-surface) 93%, var(--wb-text));
+    --wb-soft-strong: color-mix(in srgb, var(--wb-surface) 87%, var(--wb-text));
+    --wb-raised: var(--wb-surface);
+    --wb-accent: color-mix(in srgb, var(--wb-brand-a) 65%, var(--wb-text));
+    --wb-on-accent: #ffffff;
+    --wb-action-a: #634093;
+    --wb-action-b: #146d50;
+    --wb-danger: #b13c48;
+    --wb-on-danger: #ffffff;
+    --wb-danger-soft: color-mix(in srgb, var(--wb-surface) 92%, var(--wb-danger));
+    --wb-danger-border: color-mix(in srgb, var(--wb-border) 55%, var(--wb-danger));
+    --wb-success: color-mix(in srgb, var(--wb-brand-b) 60%, var(--wb-text));
+    --wb-veil: rgba(18, 18, 23, 0.55);
+    --wb-shadow: 0 16px 52px rgba(0, 0, 0, 0.2);
+    --wb-shadow-small: 0 1px 4px rgba(0, 0, 0, 0.12);
+
+    --wb-action-gradient: linear-gradient(115deg, var(--wb-action-a), var(--wb-action-b));
+    --wb-action-hover-gradient: linear-gradient(115deg, color-mix(in srgb, var(--wb-action-a) 92%, var(--wb-text)), color-mix(in srgb, var(--wb-action-b) 92%, var(--wb-text)));
+    --wb-selection-gradient: linear-gradient(115deg, color-mix(in srgb, var(--wb-surface) 91%, var(--wb-brand-a)), color-mix(in srgb, var(--wb-surface) 91%, var(--wb-brand-b)));
+    --wb-selection-border: color-mix(in srgb, var(--wb-border) 55%, var(--wb-accent));
+    --wb-focus: var(--wb-accent);
+    --wb-field-bg: var(--wb-soft);
+    --wb-switch-thumb: var(--wb-surface);
+    --wb-radius-small: 8px;
+    --wb-radius-control: 12px;
+    --wb-radius-panel: 22px;
+    --wb-touch-size: 44px;
+    --wb-gutter: 16px;
+    --wb-reading-width: 76ch;
+    --wb-transition: 150ms ease;
+    color-scheme: inherit;
+}

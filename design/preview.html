@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>回声书台</title>
+  <style>
+    :root { --bg:#edf0ed; --surface:#fbfcfa; --ink:#29322c; --muted:#6c776f; --line:#dce2dc; --accent:#37443b; color-scheme:light; padding-top:env(safe-area-inset-top,0px); padding-bottom:env(safe-area-inset-bottom,0px); }
+    @media (prefers-color-scheme:dark) { :root:not([data-theme="light"]) { --bg:#171d19; --surface:#212923; --ink:#edf2ec; --muted:#adb9ae; --line:#3e4b40; --accent:#d2dfd1; color-scheme:dark; } }
+    :root[data-theme="dark"] { --bg:#171d19; --surface:#212923; --ink:#edf2ec; --muted:#adb9ae; --line:#3e4b40; --accent:#d2dfd1; color-scheme:dark; }
+    * { box-sizing:border-box; }
+    html,body { height:100%; }
+    body { margin:0; background:var(--bg); color:var(--ink); font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",system-ui,sans-serif; }
+    #prototype { display:block; width:100%; height:100%; border:0; }
+    [hidden] { display:none!important; }
+    #loading { position:fixed; inset:0; display:flex; align-items:center; justify-content:center; background:var(--bg); padding-left:max(16px,env(safe-area-inset-left,0px)); padding-right:max(16px,env(safe-area-inset-right,0px)); }
+    .loading-copy { max-width:30em; display:flex; flex-direction:column; gap:15px; text-align:center; align-items:center; }
+    .loading-copy svg { width:45px; height:45px; }
+    .loading-copy p { margin:0; font-size:14px; color:var(--muted); line-height:1.8; }
+    .loading-copy strong { font-size:19px; }
+    .loading-copy a { color:var(--ink); font-size:13px; text-underline-offset:4px; }
+    .loading-copy button { min-height:46px; border:1px solid var(--line); background:var(--surface); color:var(--ink); border-radius:10px; padding-inline:18px; font:inherit; cursor:pointer; }
+    :focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
+  </style>
+</head>
+<body>
+  <iframe id="prototype" title="回声书台手机界面草图"></iframe>
+  <div id="loading" role="status">
+    <div class="loading-copy">
+      <svg viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M27 6H15C9 6 6 9 6 15v11c0 5 3 8 8 8h11c6 0 9-3 9-9V15"/><path d="M25 14h-6c-3 0-5 2-5 5v4c0 3 2 5 5 5h3c4 0 6-2 6-6v-2"/><circle cx="33.5" cy="7" r="1.7" fill="currentColor" stroke="none"/></svg>
+      <strong>回声书台</strong>
+      <p id="loading-message">正在打开手机界面草图…</p>
+      <button id="retry-button" hidden>重新打开</button>
+      <a id="fallback-link" href="echo-workbench.html" hidden>直接打开基础草图</a>
+    </div>
+  </div>
+  <script>
+  (() => {
+    'use strict';
+    const frame=document.getElementById('prototype');
+    const loading=document.getElementById('loading');
+    let observer=null;
+    const escapeAttribute=value=>String(value).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
+    frame.addEventListener('load',()=>{
+      const inner=frame.contentDocument;
+      if (!inner || !inner.getElementById('app')) return;
+      loading.hidden=true;
+      if (observer) observer.disconnect();
+      const sync=()=>{
+        const choice=inner.documentElement.getAttribute('data-theme');
+        if (choice) document.documentElement.setAttribute('data-theme',choice);
+        else document.documentElement.removeAttribute('data-theme');
+      };
+      sync();
+      observer=new MutationObserver(sync);
+      observer.observe(inner.documentElement,{attributes:true,attributeFilter:['data-theme']});
+    });
+    async function openPreview() {
+      loading.hidden=false;
+      document.getElementById('loading-message').textContent='正在打开手机界面草图…';
+      document.getElementById('retry-button').hidden=true;
+      document.getElementById('fallback-link').hidden=true;
+      try {
+        const response=await fetch('./echo-workbench.html',{credentials:'same-origin',cache:'no-cache'});
+        if (!response.ok) throw new Error('无法读取草图文件');
+        const source=await response.text();
+        const split=source.indexOf('</style>')+8;
+        if (split<8) throw new Error('草图文件内容不完整');
+        const base=escapeAttribute(new URL('./',location.href).href);
+        frame.srcdoc='<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><base href="'+base+'">'+source.slice(0,split)+'</head><body>'+source.slice(split)+'</body></html>';
+      } catch (error) {
+        document.getElementById('loading-message').textContent='请通过酒馆的网页地址打开此预览页。直接双击本地文件时，浏览器可能阻止读取相邻文件。';
+        document.getElementById('retry-button').hidden=false;
+        document.getElementById('fallback-link').hidden=false;
+      }
+    }
+    document.getElementById('retry-button').addEventListener('click',openPreview);
+    openPreview();
+  })();
+  </script>
+</body>
+</html>

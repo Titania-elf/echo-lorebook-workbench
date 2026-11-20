@@ -1,0 +1,26 @@
+<section id="lorebook-director-workbench" class="wb-app" data-theme="tavern" aria-label="回声书台">
+    <header class="wb-header" data-wb="header">
+        <div class="wb-brand"><img class="wb-brand-mark" data-wb="brand" alt="" aria-hidden="true"><h1 class="wb-brand-name">回声书台</h1></div>
+        <div class="wb-header-actions">
+            <button type="button" class="wb-icon-button" data-wb="theme" aria-label="主题与外观"></button>
+            <button type="button" class="wb-icon-button" data-wb="close" aria-label="关闭工作台"></button>
+        </div>
+    </header>
+    <div class="wb-context" data-wb="context"><span data-wb="context-name"></span><span class="wb-badge">世界书工作台</span></div>
+    <nav class="wb-tabs" data-wb="tabs" role="tablist" aria-label="工作台功能">
+        <button type="button" id="wb-tab-entries" class="wb-tab" data-wb="entries-tab" role="tab" aria-selected="true" aria-controls="wb-main-panel">条目</button>
+        <button type="button" id="wb-tab-scheduler" class="wb-tab" data-wb="scheduler-tab" role="tab" aria-selected="false" aria-controls="wb-main-panel">调度器</button>
+    </nav>
+    <div class="wb-editor-top" data-wb="editor-top" hidden></div>
+    <main id="wb-main-panel" class="wb-main-view" data-wb="view" role="tabpanel" aria-labelledby="wb-tab-entries" tabindex="-1"></main>
+    <div class="wb-editor-actions" data-wb="editor-actions" hidden></div>
+    <footer class="wb-footer" data-wb="footer">浏览与切换不自动挂载；保存直接修改原世界书。</footer>
+    <div class="wb-sheet-layer" data-wb="sheet-layer" hidden>
+        <button type="button" class="wb-backdrop" data-wb="sheet-close" aria-label="关闭操作面板" tabindex="-1"></button>
+        <section class="wb-sheet" data-wb="sheet" role="dialog" aria-modal="true" aria-labelledby="wb-sheet-title">
+            <header class="wb-sheet-head"><h2 id="wb-sheet-title" data-wb="sheet-title"></h2><button type="button" class="wb-icon-button" data-wb="sheet-close" aria-label="关闭操作面板"></button></header>
+            <div class="wb-sheet-body" data-wb="sheet-body"></div>
+        </section>
+    </div>
+    <div class="wb-toast" data-wb="toast" role="status" aria-live="polite" hidden></div>
+</section>

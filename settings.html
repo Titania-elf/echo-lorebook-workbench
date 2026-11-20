@@ -1,0 +1,52 @@
+<div id="lorebook-director" class="inline-drawer">
+    <div class="inline-drawer-toggle inline-drawer-header">
+        <span class="wb-brand"><img id="ld-brand-mark" class="wb-brand-mark" alt="" aria-hidden="true"><b class="wb-brand-name">回声书台</b></span>
+        <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
+    </div>
+    <div class="inline-drawer-content ld-content">
+        <button id="ld-open-workbench" type="button" class="wb-button wb-primary">打开世界书工作台</button>
+        <p class="ld-help">主入口在魔法棒菜单。工作台可编辑全部世界书；保存直接修改原书，不自动挂载。日间、夜间及跟随酒馆主题在工作台中切换。</p>
+        <label class="checkbox_label"><input id="ld-enabled" type="checkbox"><span>启用生成前调度</span></label>
+        <p class="ld-help">目录选书 → 场景工作集 → 原文交给酒馆原生扫描。调度本身不改写原书，默认关闭；手动编辑保存会修改原书。</p>
+        <details class="ld-warning">
+            <summary>启用前请了解：托管范围与失败回退</summary>
+            <p>仅托管下方勾选、且已通过酒馆原生方式挂载到当前聊天的世界书。托管书内蓝灯和绿灯都交给调度器；必须常驻的条目请手动固定，或放在未托管的书里。</p>
+            <p>API 超时、无效 JSON 等错误会让本轮回退原生触发，此时手动排除也不生效。此最小版不适合作为严格的剧透锁或权限控制。</p>
+            <p>每次生成通常增加一次辅助模型调用，会发送最近对话、旧场景和目录。AI 概括目录按钮还会发送条目原文。不额外保存 API 密钥。</p>
+            <p>普通回复、重生成、滑动重写、续写会调度；安静生成、代写用户和酒馆提示词预览仍走原生规则。其他插件若并发构建提示词，可能使本轮回退原生。</p>
+            <p>原生位置、预算、概率、互斥组、角色过滤等仍可阻止选中条目激活。托管模式不保证原生黏性/冷却计时连续，请用这里的场景工作集管理保留。</p>
+        </details>
+
+        <label for="ld-profile">辅助模型连接</label>
+        <select id="ld-profile" class="text_pole" data-ld-lock></select>
+        <small class="ld-help">可复用当前聊天补全连接，或选择“连接管理器”中保存的独立配置；不会切换正文连接。</small>
+
+        <label for="ld-books">托管世界书（多选；设置全局保存，仅当前已挂载的书生效）</label>
+        <select id="ld-books" class="text_pole" multiple size="5" data-ld-lock></select>
+        <small id="ld-book-note" class="ld-help"></small>
+        <button id="ld-refresh" class="menu_button" type="button" data-ld-lock>刷新书目与本地目录</button>
+
+        <div class="ld-grid">
+            <label>单轮最多条目<input id="ld-maxEntries" class="text_pole" type="number" min="1" max="30" data-ld-lock></label>
+            <label>原文 token 预算<input id="ld-tokenBudget" class="text_pole" type="number" min="128" max="16000" step="128" data-ld-lock></label>
+            <label>读取最近消息数<input id="ld-recentMessages" class="text_pole" type="number" min="1" max="30" data-ld-lock></label>
+            <label>单次请求超时（秒）<input id="ld-timeoutSeconds" class="text_pole" type="number" min="10" max="180" data-ld-lock></label>
+        </div>
+        <small class="ld-help">固定条目优先，但也遵守数量/token 上限。原文不截断；最终还受酒馆原生世界书预算限制。</small>
+
+        <div class="ld-buttons">
+            <button id="ld-preview" class="menu_button" type="button" data-ld-lock>试选（调用 API）</button>
+            <button id="ld-summarize" class="menu_button" type="button" data-ld-lock>AI 概括目录（调用 API）</button>
+            <button id="ld-cancel" class="menu_button" type="button" disabled>取消辅助请求</button>
+            <button id="ld-reset" class="menu_button" type="button" data-ld-lock>清空场景记忆</button>
+        </div>
+        <small class="ld-help">不做 AI 概括也可使用：目录默认取标题与前 240 字原文。试选只看已发送的聊天，不含输入框草稿，不更新场景、不发送正文。固定/排除仅保存在本聊天，直到手动解除。</small>
+        <div id="ld-status" role="status" aria-live="polite"></div>
+        <div id="ld-result" class="ld-help"></div>
+        <div id="ld-scene" class="ld-scene"></div>
+
+        <label for="ld-search">条目目录 / 最近一次选择理由</label>
+        <input id="ld-search" class="text_pole" type="search" placeholder="搜索标题、世界书或摘要">
+        <div id="ld-entries" class="ld-entries"></div>
+    </div>
+</div>

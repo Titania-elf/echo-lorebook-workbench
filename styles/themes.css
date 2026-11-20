@@ -1,0 +1,72 @@
+/* Explicit themes are complete palettes; the brand endpoints stay unchanged. */
+:is(#lorebook-director-workbench, #lorebook-director-menu, #lorebook-director, .echo-workbench-popup)[data-theme="light"] {
+    --wb-bg: #f5f5f7;
+    --wb-surface: #ffffff;
+    --wb-text: #28272e;
+    --wb-muted: #696672;
+    --wb-border: #dcdce3;
+    --wb-soft: #f1f1f5;
+    --wb-soft-strong: #e7e7ee;
+    --wb-raised: #ffffff;
+    --wb-accent: #654298;
+    --wb-on-accent: #ffffff;
+    --wb-action-a: #634093;
+    --wb-action-b: #146d50;
+    --wb-danger: #b13c48;
+    --wb-on-danger: #ffffff;
+    --wb-danger-soft: #fbebed;
+    --wb-danger-border: #ecc0c5;
+    --wb-success: #226c52;
+    --wb-veil: rgba(24, 24, 28, 0.48);
+    --wb-shadow: 0 16px 52px rgba(31, 28, 40, 0.16);
+    --wb-shadow-small: 0 1px 4px rgba(31, 28, 40, 0.1);
+    color-scheme: light;
+}
+
+:is(#lorebook-director-workbench, #lorebook-director-menu, #lorebook-director, .echo-workbench-popup)[data-theme="dark"] {
+    --wb-bg: #19191d;
+    --wb-surface: #232329;
+    --wb-text: #f1eff6;
+    --wb-muted: #b2adbd;
+    --wb-border: #3d3a45;
+    --wb-soft: #2b2932;
+    --wb-soft-strong: #35323e;
+    --wb-raised: #2b2932;
+    --wb-accent: #c6aff3;
+    --wb-on-accent: #1e1928;
+    --wb-action-a: #c6aff3;
+    --wb-action-b: #72debb;
+    --wb-danger: #f2a5af;
+    --wb-on-danger: #2c1820;
+    --wb-danger-soft: #38262e;
+    --wb-danger-border: #71505c;
+    --wb-success: #8bddbd;
+    --wb-veil: rgba(8, 8, 12, 0.68);
+    --wb-shadow: 0 16px 52px rgba(0, 0, 0, 0.38);
+    --wb-shadow-small: 0 1px 4px rgba(0, 0, 0, 0.28);
+    color-scheme: dark;
+}
+
+:is(#lorebook-director-workbench, #lorebook-director-menu, #lorebook-director, .echo-workbench-popup)[data-theme="tavern"] {
+    --wb-bg: var(--SmartThemeBlurTintColor, #f5f5f7);
+    --wb-surface: var(--SmartThemeBlurTintColor, #ffffff);
+    --wb-text: var(--SmartThemeBodyColor, #28272e);
+    --wb-muted: var(--SmartThemeEmColor, #696672);
+    --wb-border: var(--SmartThemeBorderColor, #dcdce3);
+    --wb-soft: color-mix(in srgb, var(--wb-surface) 93%, var(--wb-text));
+    --wb-soft-strong: color-mix(in srgb, var(--wb-surface) 87%, var(--wb-text));
+    --wb-raised: var(--wb-surface);
+    --wb-accent: color-mix(in srgb, var(--wb-brand-a) 65%, var(--wb-text));
+    --wb-on-accent: #ffffff;
+    --wb-action-a: #634093;
+    --wb-action-b: #146d50;
+    --wb-danger: color-mix(in srgb, #d94660 70%, var(--wb-text));
+    --wb-on-danger: #ffffff;
+    --wb-danger-soft: color-mix(in srgb, var(--wb-surface) 92%, var(--wb-danger));
+    --wb-danger-border: color-mix(in srgb, var(--wb-border) 55%, var(--wb-danger));
+    --wb-success: color-mix(in srgb, var(--wb-brand-b) 60%, var(--wb-text));
+    --wb-veil: rgba(18, 18, 23, 0.55);
+    --wb-shadow: 0 16px 52px rgba(0, 0, 0, 0.2);
+    --wb-shadow-small: 0 1px 4px rgba(0, 0, 0, 0.12);
+    color-scheme: inherit;
+}

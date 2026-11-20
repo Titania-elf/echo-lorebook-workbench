@@ -1,0 +1,13 @@
+{
+    "display_name": "回声书台 · Echo Workbench",
+    "loading_order": 110,
+    "requires": [],
+    "optional": [],
+    "js": "index.js",
+    "css": "style.css",
+    "author": "",
+    "version": "0.2.0",
+    "homePage": "https://github.com/Titania-elf/echo-lorebook-workbench",
+    "auto_update": false,
+    "generate_interceptor": "lorebookDirectorInterceptor"
+}

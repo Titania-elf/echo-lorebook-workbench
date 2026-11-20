@@ -1,0 +1,313 @@
+/* Shared settings controls also appear in editor details and the sheets. */
+:is(#lorebook-director-workbench, #lorebook-director, .echo-workbench-popup) .wb-settings-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 16px;
+    min-width: 0;
+}
+
+:is(#lorebook-director-workbench, #lorebook-director, .echo-workbench-popup) .wb-settings-grid > * {
+    min-width: 0;
+}
+
+:is(#lorebook-director-workbench, #lorebook-director, .echo-workbench-popup) .wb-switch {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    min-width: 0;
+    min-height: 48px;
+    padding-block: 4px;
+    color: var(--wb-text);
+    font-size: 14px;
+    line-height: 1.6;
+    cursor: pointer;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+}
+
+:is(#lorebook-director-workbench, #lorebook-director, .echo-workbench-popup) .wb-switch > :not(input) {
+    flex: 1 1 0;
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+:is(#lorebook-director-workbench, #lorebook-director, .echo-workbench-popup) .wb-switch input[type="checkbox"] {
+    position: relative;
+    order: 1;
+    width: 44px;
+    height: 26px;
+    min-width: 44px;
+    min-height: 26px;
+    margin: 0;
+    padding: 0;
+    flex: 0 0 44px;
+    border: 1px solid var(--wb-border);
+    border-radius: 99px;
+    background: var(--wb-soft-strong);
+    box-shadow: none;
+    appearance: none;
+    -webkit-appearance: none;
+    cursor: pointer;
+    transition: background var(--wb-transition), border-color var(--wb-transition);
+}
+
+:is(#lorebook-director-workbench, #lorebook-director, .echo-workbench-popup) .wb-switch input[type="checkbox"]::before {
+    content: "";
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: var(--wb-switch-thumb);
+    box-shadow: var(--wb-shadow-small);
+    transition: transform var(--wb-transition), background var(--wb-transition);
+}
+
+:is(#lorebook-director-workbench, #lorebook-director, .echo-workbench-popup) .wb-switch input[type="checkbox"]:checked {
+    border-color: transparent;
+    background: var(--wb-action-gradient);
+}
+
+:is(#lorebook-director-workbench, #lorebook-director, .echo-workbench-popup) .wb-switch input[type="checkbox"]:checked::before {
+    background: var(--wb-on-accent);
+    transform: translateX(18px);
+}
+
+:is(#lorebook-director-workbench, #lorebook-director, .echo-workbench-popup) .wb-switch:has(input:disabled) {
+    cursor: not-allowed;
+}
+
+:is(#lorebook-director-workbench, #lorebook-director, .echo-workbench-popup) .wb-segment {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    min-width: 0;
+    padding: 4px;
+    border-radius: var(--wb-radius-control);
+    background: var(--wb-soft);
+}
+
+:is(#lorebook-director-workbench, #lorebook-director, .echo-workbench-popup) .wb-segment button {
+    display: inline-flex;
+    flex: 1 1 72px;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-width: var(--wb-touch-size);
+    min-height: var(--wb-touch-size);
+    padding: 10px 8px;
+    border: 1px solid transparent;
+    border-radius: 9px;
+    background: transparent;
+    color: var(--wb-muted);
+    font-size: 13px;
+    line-height: 1.5;
+    transition: background var(--wb-transition), color var(--wb-transition);
+}
+
+:is(#lorebook-director-workbench, #lorebook-director, .echo-workbench-popup) .wb-segment button[aria-pressed="true"] {
+    background: var(--wb-action-gradient);
+    color: var(--wb-on-accent);
+    font-weight: 600;
+}
+
+/* The original ld-* functional styles are retained inside the legacy panel. */
+#lorebook-director .ld-content {
+    padding: 10px 4px;
+    color: var(--wb-text);
+}
+
+#lorebook-director .ld-content > label {
+    display: block;
+    margin-top: 12px;
+}
+
+#lorebook-director .ld-content > .checkbox_label {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: var(--wb-touch-size);
+}
+
+#lorebook-director .ld-help {
+    display: block;
+    color: var(--wb-muted);
+    font-size: 0.88em;
+    line-height: 1.55;
+    overflow-wrap: anywhere;
+}
+
+#lorebook-director .ld-warning {
+    margin: 10px 0;
+    padding: 10px;
+    border: 1px solid var(--wb-border);
+    border-radius: 10px;
+    background: var(--wb-soft);
+}
+
+#lorebook-director .ld-warning summary {
+    min-height: var(--wb-touch-size);
+    cursor: pointer;
+}
+
+#lorebook-director .ld-warning p {
+    font-size: 0.88em;
+    line-height: 1.6;
+}
+
+#lorebook-director .ld-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+    margin: 12px 0;
+}
+
+#lorebook-director .ld-grid label {
+    min-width: 0;
+}
+
+#lorebook-director .ld-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 12px 0;
+}
+
+#lorebook-director .ld-buttons button {
+    margin: 0;
+    white-space: normal;
+}
+
+#lorebook-director .ld-buttons button:not(.wb-button) {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    min-width: var(--wb-touch-size);
+    min-height: var(--wb-touch-size);
+    padding: 10px 12px;
+    border: 1px solid var(--wb-border);
+    border-radius: 10px;
+    background: var(--wb-surface);
+    color: var(--wb-text);
+    box-shadow: none;
+    font-size: 14px;
+    line-height: 1.4;
+}
+
+#lorebook-director button:disabled,
+#lorebook-director select:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+#lorebook-director #ld-status {
+    padding: 8px 10px;
+    border-left: 3px solid var(--wb-accent);
+    border-radius: 0 8px 8px 0;
+    background: var(--wb-soft);
+    line-height: 1.6;
+    overflow-wrap: anywhere;
+}
+
+#lorebook-director .ld-scene {
+    margin: 10px 0;
+    font-size: 0.92em;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+#lorebook-director .ld-entries {
+    max-height: 460px;
+    margin-top: 8px;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+}
+
+#lorebook-director .ld-entry {
+    padding: 10px 0;
+    border-top: 1px solid var(--wb-border);
+    overflow-wrap: anywhere;
+}
+
+#lorebook-director .ld-entry-title {
+    font-weight: 600;
+}
+
+#lorebook-director .ld-entry select {
+    max-width: 100%;
+    margin: 6px 0;
+}
+
+#lorebook-director .ld-entry-reason {
+    font-size: 0.9em;
+    line-height: 1.5;
+}
+
+#lorebook-director select[multiple] {
+    min-height: 110px;
+}
+
+#lorebook-director .ld-content :where(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="hidden"]), select, textarea) {
+    width: 100%;
+    min-width: 0;
+    min-height: 48px;
+    padding: 10px 12px;
+    border: 1px solid var(--wb-border);
+    border-radius: 10px;
+    background: var(--wb-field-bg);
+    color: var(--wb-text);
+    font-family: var(--wb-body-font);
+    font-size: 16px;
+    line-height: 1.5;
+}
+
+#lorebook-director .ld-content :is(input, textarea, select):focus {
+    border-color: var(--wb-focus);
+    outline: 2px solid var(--wb-focus);
+    outline-offset: 0;
+}
+
+#lorebook-director .ld-content textarea {
+    min-height: 120px;
+    max-height: 400px;
+    resize: vertical;
+    overflow-y: auto;
+}
+
+#lorebook-director select option {
+    background: var(--wb-surface);
+    color: var(--wb-text);
+}
+
+#lorebook-director .wb-brand {
+    margin-block: 4px 12px;
+}
+
+#lorebook-director .ld-content > .wb-button.wb-primary {
+    width: 100%;
+    margin-block: 12px;
+}
+
+@media (min-width: 560px) {
+    :is(#lorebook-director-workbench, #lorebook-director, .echo-workbench-popup) .wb-settings-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 480px) {
+    #lorebook-director .ld-grid {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
+
+@media (hover: hover) {
+    :is(#lorebook-director-workbench, #lorebook-director, .echo-workbench-popup) .wb-segment button:not([aria-pressed="true"]):not(:disabled):hover,
+    #lorebook-director .ld-buttons button:not(.wb-button):not(:disabled):hover {
+        background: var(--wb-soft-strong);
+        color: var(--wb-text);
+    }
+}
