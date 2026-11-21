@@ -1,7 +1,8 @@
-import { MODULE, EXTENSION_FOLDER } from './core.js';
+import { MODULE, EXTENSION_FOLDER, apiSelection, apiSelectionPatch } from './core.js';
 import { assetUrl } from './workbench-utils.js';
+import { catalogScope, resultSummary, choiceState } from './scheduler-report.js';
 
-export async function mountUI(director, { openWorkbench } = {}) {
+export async function mountUI(director) {
     const context = director.getContext();
     const host = document.querySelector('#extensions_settings2') || document.querySelector('#extensions_settings');
     if (!host) throw new Error('找不到酒馆扩展设置面板。');
@@ -9,9 +10,8 @@ export async function mountUI(director, { openWorkbench } = {}) {
     const root = document.getElementById(MODULE);
     const element = name => root.querySelector(`#ld-${name}`);
     element('brand-mark').src = assetUrl('echo-mark.svg');
-    element('open-workbench').disabled = typeof openWorkbench !== 'function';
-    if (openWorkbench) element('open-workbench').addEventListener('click', openWorkbench);
     const fieldNames = ['maxEntries', 'tokenBudget', 'recentMessages', 'timeoutSeconds'];
+    let connectionSignature = '';
     const currentReport = () => {
         const report = director.report;
         return report?.chatKey && report.chatKey !== director.chatKey() ? null : report;
@@ -25,27 +25,53 @@ export async function mountUI(director, { openWorkbench } = {}) {
     function refreshLists() {
         const config = director.config;
         const current = director.getContext();
-        const profiles = element('profile');
-        profiles.replaceChildren();
-        addOption(profiles, '', '当前聊天补全连接', !config.profileId);
-        let supported = [];
-        try { supported = current.ConnectionManagerRequestService.getSupportedProfiles(); } catch { /* Optional extension. */ }
-        for (const profile of supported) addOption(profiles, profile.id, profile.name, config.profileId === profile.id);
-        if (config.profileId && !supported.some(p => p.id === config.profileId)) {
-            addOption(profiles, config.profileId, '所选连接已失效（请重新选择）', true);
-        }
+        refreshConnections(config, true);
         const books = element('books');
         books.replaceChildren();
         const names = [...new Set([...current.getWorldInfoNames(), ...config.books])].sort((a, b) => a.localeCompare(b));
         for (const name of names) addOption(books, name, name, config.books.includes(name));
     }
 
+    function refreshConnections(config, force = false) {
+        const select = element('profile');
+        let supported = [];
+        try { supported = director.getContext().ConnectionManagerRequestService?.getSupportedProfiles() || []; }
+        catch { /* Saved profiles are an optional host feature. */ }
+        const signature = JSON.stringify([config.apiSchemes.map(value => [value.id, value.name]), supported.map(value => [value.id, value.name])]);
+        if (force || signature !== connectionSignature) {
+            connectionSignature = signature;
+            select.replaceChildren();
+            addOption(select, 'main', '跟随酒馆主连接');
+            if (config.apiSchemes.length) {
+                const group = document.createElement('optgroup'); group.label = '自建 API 方案';
+                for (const scheme of config.apiSchemes) addOption(group, `scheme:${scheme.id}`, scheme.name || '未命名方案');
+                select.append(group);
+            }
+            if (supported.length) {
+                const group = document.createElement('optgroup'); group.label = '酒馆已有连接';
+                for (const profile of supported) addOption(group, `profile:${profile.id}`, profile.name);
+                select.append(group);
+            }
+        }
+        const selected = apiSelection(config);
+        if (![...select.options].some(option => option.value === selected)) addOption(select, selected, '所选连接已失效（请重新选择）');
+        select.value = selected;
+    }
+
+    function syncSavedChoices(config) {
+        refreshConnections(config);
+        const books = element('books');
+        const known = new Set([...books.options].map(option => option.value));
+        const selected = new Set(config.books);
+        for (const name of selected) if (!known.has(name)) addOption(books, name, name);
+        for (const option of books.options) option.selected = selected.has(option.value);
+    }
+
     function renderEntries() {
         const filter = element('search').value.trim().toLocaleLowerCase();
         const report = currentReport();
-        const selected = new Map((report?.selected || []).map(x => [x.id, x]));
+        const selected = new Map([...(report?.blue || []), ...(report?.selected || [])].map(x => [x.id, x]));
         const skipped = new Map((report?.skipped || []).map(x => [x.id, x]));
-        const actual = new Set(report?.actual || []);
         const overrides = director.state().overrides;
         const container = element('entries');
         container.replaceChildren();
@@ -55,22 +81,31 @@ export async function mountUI(director, { openWorkbench } = {}) {
             const card = document.createElement('div'); card.className = 'ld-entry';
             const title = document.createElement('div'); title.className = 'ld-entry-title'; title.textContent = item.title;
             const source = document.createElement('small'); source.className = 'ld-help';
-            source.textContent = `${item.entry.world} · #${item.entry.uid} · ${item.summaryKind}`;
+            source.textContent = `${item.entry.world} · #${item.entry.uid} · ${item.kind === 'blue' ? '蓝灯常驻' : '绿灯候选'} · ${item.summaryKind}（仅展示）`;
             const summary = document.createElement('div'); summary.className = 'ld-help'; summary.textContent = item.summary;
             const mode = document.createElement('select'); mode.className = 'text_pole';
             mode.setAttribute('aria-label', `${item.title} 的调度方式`);
-            for (const [value, label] of [['auto', '自动调度'], ['pin', '本聊天固定（仍受预算限制）'], ['exclude', '本聊天排除（失败回退时无效）']]) {
+            const blue = item.kind === 'blue';
+            const oldRule = (overrides[item.id] || 'auto') !== 'auto';
+            for (const [value, label] of [
+                ['auto', blue ? oldRule ? '解除旧规则，保持蓝灯常驻' : '蓝灯默认常驻' : '自动筛选绿灯'],
+                ['pin', blue ? '旧固定规则（蓝灯期间不生效）' : '本聊天固定（仍受绿灯预算限制）'],
+                ['exclude', blue ? '旧排除规则（蓝灯期间不生效）' : '本聊天排除（失败回退时无效）'],
+            ]) {
                 addOption(mode, value, label, (overrides[item.id] || 'auto') === value);
+                if (blue && value !== 'auto') mode.lastElementChild.disabled = true;
             }
-            mode.disabled = director.busy || !director.getContext().chatId;
+            mode.disabled = director.busy || !director.getContext().chatId || (blue && !oldRule);
             mode.addEventListener('change', () => director.setOverride(item.id, mode.value));
             const reason = document.createElement('div'); reason.className = 'ld-entry-reason';
             const choice = selected.get(item.id);
             if (choice) {
-                const state = report.mode === 'preview' ? '试选' : director.gate ? '等待原生扫描' : actual.has(item.id) ? '原生已激活' : '选中但未激活（检查原生预算/概率/过滤）';
-                reason.textContent = `${report.stale ? '结果已过期，请重新试选 · ' : ''}${state} · ${choice.scope === 'scene' ? '场景资料' : '临时资料'} · 约 ${choice.tokens} tokens — ${choice.reason}`;
+                const state = choiceState(report, item.id);
+                reason.textContent = `${report.stale ? '结果已过期，请重新试选 · ' : ''}${state} · ${choice.kind === 'blue' ? '蓝灯常驻' : '绿灯入选'} · ${choice.position === 'before' ? '世界书之前' : '世界书之后'} · 约 ${choice.tokens} tokens — ${choice.reason}`;
             } else if (skipped.has(item.id)) {
                 reason.textContent = `未纳入：${skipped.get(item.id).reason}`;
+            } else if (blue) {
+                reason.textContent = '已启用的蓝灯默认常驻，不由模型选择，也不使用旧固定／排除规则。';
             } else if (overrides[item.id] === 'exclude') {
                 reason.textContent = '手动排除；正常调度不会加载。';
             } else {
@@ -89,22 +124,20 @@ export async function mountUI(director, { openWorkbench } = {}) {
     function render() {
         const config = director.config;
         element('enabled').checked = config.enabled;
+        syncSavedChoices(config);
         for (const name of fieldNames) element(name).value = config[name];
         root.querySelectorAll('[data-ld-lock]').forEach(input => { input.disabled = director.busy; });
-        element('cancel').disabled = !director.busy;
+        element('cancel').disabled = !director.operation && (!director.gate || director.gate.committed);
         element('status').textContent = director.status;
-        const missing = config.books.filter(book => !director.activeBooks.includes(book));
-        element('book-note').textContent = `${director.catalog.length} 个可用条目。${missing.length ? `未挂载或为空：${missing.join('、')}` : '仅当前挂载的世界书参与调度。'}`;
+        element('book-note').textContent = catalogScope(director);
         const report = currentReport();
         element('scene').textContent = report?.scene ? `当前场景：${report.scene}` : '';
-        element('result').textContent = report && report.mode !== 'fallback'
-            ? `最近${report.mode === 'preview' ? '试选' : '生成'}：${report.selected.length} 条，约 ${report.tokens} tokens；${report.skipped.length} 条因手动规则或预算未纳入。`
-            : report?.mode === 'fallback' ? '本轮没有接管世界书，原生规则照常执行。' : '';
+        element('result').textContent = report ? resultSummary(report) : '';
         renderEntries();
     }
 
     element('enabled').addEventListener('change', () => director.updateSettings({ enabled: element('enabled').checked }));
-    element('profile').addEventListener('change', () => director.updateSettings({ profileId: element('profile').value }));
+    element('profile').addEventListener('change', () => director.updateSettings(apiSelectionPatch(element('profile').value)));
     element('books').addEventListener('change', async () => {
         director.updateSettings({ books: Array.from(element('books').selectedOptions, option => option.value) });
         await director.loadCatalog();

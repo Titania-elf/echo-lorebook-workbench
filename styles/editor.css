@@ -83,7 +83,7 @@
     background: var(--wb-field-bg);
     color: var(--wb-text);
     box-shadow: none;
-    font-family: var(--wb-body-font);
+    font-family: inherit;
     font-size: 16px;
     font-weight: 400;
     line-height: 1.5;

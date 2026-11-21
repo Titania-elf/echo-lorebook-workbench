@@ -231,66 +231,40 @@ body.safari .echo-workbench-popup.popup .popup-body {
     text-align: center;
 }
 
-#lorebook-director-menu.wb-menu-entry {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    width: 100%;
-    min-height: 48px;
-    margin: 0;
-    padding: 8px 12px;
-    border: 1px solid transparent;
-    border-radius: 10px;
-    background: transparent;
-    color: var(--wb-text);
-    font-family: var(--wb-body-font);
-    text-align: start;
-    cursor: pointer;
-    touch-action: manipulation;
-    -webkit-tap-highlight-color: transparent;
-}
-
-#lorebook-director-menu.wb-menu-entry .wb-brand-name {
-    font-size: 18px;
-}
-
-#lorebook-director-menu.wb-menu-entry[aria-current="true"] {
-    border-color: var(--wb-selection-border);
-    background: var(--wb-selection-gradient);
-}
-
 @media (hover: hover) {
-    #lorebook-director-workbench .wb-tab:not([aria-selected="true"]):not(:disabled):hover,
-    #lorebook-director-menu.wb-menu-entry:not([aria-disabled="true"]):hover {
+    #lorebook-director-workbench .wb-tab:not([aria-selected="true"]):not(:disabled):hover {
         background: var(--wb-soft-strong);
         color: var(--wb-text);
     }
 }
 
-@media (max-width: 700px) {
-    .echo-workbench-popup.popup {
-        width: 100%;
-        top: var(--wb-viewport-top, 0px);
-        bottom: auto;
-        height: var(--wb-viewport-height, 100vh);
-        height: var(--wb-viewport-height, 100dvh);
-        min-width: 0;
-        min-height: 0;
-        max-width: 100%;
-        max-height: var(--wb-viewport-height, 100vh);
-        max-height: var(--wb-viewport-height, 100dvh);
-        margin: 0;
-        border: 0;
-        border-radius: 0;
-    }
+/* The host's large popup sets 90dvh / 90dvw with !important. */
+.echo-workbench-popup.popup[data-wb-fullscreen="true"] {
+    position: fixed;
+    inset: auto;
+    top: var(--wb-viewport-top, 0px) !important;
+    left: var(--wb-viewport-left, 0px) !important;
+    width: var(--wb-viewport-width, 100vw) !important;
+    width: var(--wb-viewport-width, 100dvw) !important;
+    height: var(--wb-viewport-height, 100vh) !important;
+    height: var(--wb-viewport-height, 100dvh) !important;
+    min-width: 0 !important;
+    min-height: 0 !important;
+    max-width: var(--wb-viewport-width, 100vw) !important;
+    max-width: var(--wb-viewport-width, 100dvw) !important;
+    max-height: var(--wb-viewport-height, 100vh) !important;
+    max-height: var(--wb-viewport-height, 100dvh) !important;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+}
 
-    #lorebook-director-workbench.wb-app {
-        --wb-safe-top: env(safe-area-inset-top, 0px);
-        --wb-safe-right: env(safe-area-inset-right, 0px);
-        --wb-safe-bottom: env(safe-area-inset-bottom, 0px);
-        --wb-safe-left: env(safe-area-inset-left, 0px);
-        --wb-gutter: 16px;
-    }
+#lorebook-director-workbench.wb-app[data-fullscreen="true"] {
+    --wb-safe-top: env(safe-area-inset-top, 0px);
+    --wb-safe-right: env(safe-area-inset-right, 0px);
+    --wb-safe-bottom: env(safe-area-inset-bottom, 0px);
+    --wb-safe-left: env(safe-area-inset-left, 0px);
 }
 
 @media (max-width: 360px) {

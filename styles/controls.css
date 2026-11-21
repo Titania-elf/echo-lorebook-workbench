@@ -1,0 +1,154 @@
+/* Explicit light colors stay local; typography still inherits the tavern font. */
+:is(#lorebook-director-workbench, #lorebook-director, .echo-workbench-popup)[data-theme="light"] :where(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="hidden"]), textarea, select) {
+    color: var(--wb-text) !important;
+    -webkit-text-fill-color: var(--wb-text) !important;
+    background-color: var(--wb-field-bg) !important;
+    border-color: var(--wb-border) !important;
+    box-shadow: none !important;
+    text-shadow: none !important;
+    filter: none !important;
+}
+
+:is(#lorebook-director-workbench, #lorebook-director, .echo-workbench-popup)[data-theme="light"] :is(input, textarea)::placeholder {
+    color: var(--wb-muted) !important;
+    -webkit-text-fill-color: var(--wb-muted) !important;
+    opacity: 1;
+}
+
+:is(#lorebook-director-workbench, #lorebook-director, .echo-workbench-popup)[data-theme="light"] select {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='m2 2 4 4 4-4' fill='none' stroke='%23696672' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E") !important;
+    background-repeat: no-repeat !important;
+    background-position: right 8px center !important;
+    background-size: 10px 7px !important;
+}
+
+:is(#lorebook-director-workbench, #lorebook-director, .echo-workbench-popup)[data-theme="light"] select :is(option, optgroup) {
+    color: var(--wb-text) !important;
+    -webkit-text-fill-color: var(--wb-text) !important;
+    background-color: var(--wb-surface) !important;
+}
+
+:is(#lorebook-director-workbench, #lorebook-director, .echo-workbench-popup)[data-theme="light"] :is(input, textarea, select):focus {
+    border-color: var(--wb-focus) !important;
+}
+
+:is(#lorebook-director-workbench, #lorebook-director, .echo-workbench-popup)[data-theme="light"] [aria-invalid="true"] {
+    border-color: var(--wb-danger) !important;
+}
+
+#lorebook-director-workbench .wb-managed-list {
+    padding: 3px 4px;
+}
+
+#lorebook-director-workbench .wb-managed-option {
+    flex: 0 0 auto;
+    min-width: 0;
+    padding-inline: 4px 8px;
+}
+
+#lorebook-director-workbench .wb-managed-option > input[type="checkbox"] {
+    position: relative;
+    display: block;
+    appearance: none;
+    -webkit-appearance: none;
+    width: 20px;
+    height: 20px;
+    min-width: 20px;
+    min-height: 20px;
+    flex: 0 0 20px;
+    margin: 0;
+    border: 1px solid var(--wb-border);
+    border-radius: 4px;
+    background: var(--wb-field-bg);
+    box-shadow: none;
+    outline: none;
+    overflow: visible;
+    transform: none;
+    filter: none;
+}
+
+#lorebook-director-workbench .wb-managed-option > input[type="checkbox"]::before {
+    content: "";
+    position: absolute;
+    top: 3px;
+    left: 6px;
+    width: 6px;
+    height: 10px;
+    border: solid var(--wb-on-accent);
+    border-width: 0 2px 2px 0;
+    background: transparent;
+    box-shadow: none;
+    clip-path: none;
+    transform: rotate(45deg);
+    transform-origin: center;
+    opacity: 0;
+    transition: opacity var(--wb-transition);
+}
+
+#lorebook-director-workbench .wb-managed-option > input[type="checkbox"]:checked {
+    border-color: var(--wb-accent);
+    background: var(--wb-accent);
+}
+
+#lorebook-director-workbench .wb-managed-option > input[type="checkbox"]:checked::before {
+    transform: rotate(45deg);
+    opacity: 1;
+}
+
+#lorebook-director-workbench .wb-managed-option > input[type="checkbox"]:focus-visible {
+    outline: 2px solid var(--wb-focus);
+    outline-offset: 2px;
+}
+
+#lorebook-director-workbench .wb-api-toolbar,
+#lorebook-director-workbench .wb-api-model-row {
+    display: flex;
+    align-items: flex-end;
+    gap: 10px;
+    min-width: 0;
+}
+
+#lorebook-director-workbench :is(.wb-api-toolbar, .wb-api-model-row) > .wb-field {
+    flex: 1 1 0;
+    max-width: none;
+    min-width: 0;
+}
+
+#lorebook-director-workbench .wb-api-scheme-actions {
+    display: flex;
+    flex: 0 0 auto;
+    gap: 6px;
+}
+
+#lorebook-director-workbench .wb-api-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+    align-items: end;
+}
+
+#lorebook-director-workbench .wb-api-grid > .wb-field {
+    max-width: none;
+}
+
+#lorebook-director-workbench .wb-api-auto {
+    align-self: flex-start;
+    justify-content: flex-start;
+    gap: 8px;
+    min-height: 32px;
+    font-size: .8em;
+}
+
+@media (max-width: 540px) {
+    #lorebook-director-workbench .wb-api-toolbar {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    #lorebook-director-workbench .wb-api-scheme-actions {
+        justify-content: flex-end;
+    }
+    #lorebook-director-workbench .wb-api-model-row > .wb-button {
+        padding-inline: 7px;
+        font-size: .75em;
+    }
+}

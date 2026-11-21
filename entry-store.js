@@ -1,4 +1,5 @@
 import { clone, sameValue, contextKey, UID_LIMIT, bookWatermark, reserveBookWatermark } from './workbench-state.js';
+import { bookCategories, entryCategory, assignEntryCategory } from './book-categories.js';
 
 const object = value => value && typeof value === 'object' && !Array.isArray(value);
 const ownEntry = (data, uid) => Object.hasOwn(data.entries, String(uid)) ? data.entries[String(uid)] : undefined;
@@ -27,7 +28,10 @@ export class EntryStore {
     }
 
     get busy() { return this.inFlight > 0; }
-    get dirty() { return Boolean(this.session && (this.session.isNew || this.session.changes.size)); }
+    get dirty() {
+        const session = this.session;
+        return Boolean(session && (session.isNew || session.changes.size || session.categoryDraft !== session.categoryBaseline));
+    }
 
     notify() {
         try { this.onChange(this); }
@@ -104,6 +108,8 @@ export class EntryStore {
             baseline, draft, bookBaseline: clone(data), changes: new Set(),
             context: contextKey(this.api.getContext()), status: 'idle', problem: '',
             pending: null, externalChanged: false,
+            categoryBaseline: isNew ? '' : entryCategory(data, key),
+            categoryDraft: key === null ? '' : entryCategory(data, key),
         };
         this.notify();
         return this.session;
@@ -138,6 +144,18 @@ export class EntryStore {
         }
         session.problem = '';
         if (session.status !== 'saving') session.status = 'idle';
+        this.notify();
+    }
+
+    setCategory(id) {
+        const session = this.session;
+        if (!session || this.busy || session.pending) return;
+        if (typeof id !== 'string' || (id && !bookCategories(this.loaded.get(session.book)).some(value => value.id === id))) {
+            throw new EntryStoreError('请从这本书已有的分类中选择。', 'validation');
+        }
+        session.categoryDraft = id;
+        session.problem = '';
+        session.status = 'idle';
         this.notify();
     }
 
@@ -209,12 +227,14 @@ export class EntryStore {
             const accepted = await this.api.acceptSaved(session.book, latest);
             return this.finish(session, latest, pending.uid, accepted.warning, true);
         }
-        if (pending.kind === 'save' && object(actual) && sameValue(actual, pending.data.entries[pending.uid])) {
+        if (pending.kind === 'save' && object(actual) && sameValue(actual, pending.data.entries[pending.uid])
+            && entryCategory(latest, pending.uid) === entryCategory(pending.data, pending.uid)) {
             const accepted = await this.api.acceptSaved(session.book, latest);
             return this.finish(session, latest, pending.uid, accepted.warning, false);
         }
         const original = pending.isNew ? undefined : session.baseline;
-        if (sameValue(actual, original)) {
+        if (sameValue(actual, original)
+            && entryCategory(latest, pending.uid) === (pending.isNew ? '' : session.categoryBaseline)) {
             session.pending = null;
             return null;
         }
@@ -234,6 +254,8 @@ export class EntryStore {
                 session.baseline = clone(data.entries[uid]);
                 session.draft = clone(session.baseline);
                 session.bookBaseline = clone(data);
+                session.categoryBaseline = entryCategory(data, uid);
+                session.categoryDraft = session.categoryBaseline;
                 session.changes.clear();
                 session.externalChanged = false;
                 session.status = 'idle';
@@ -316,6 +338,13 @@ export class EntryStore {
                 Object.defineProperty(latest.entries, String(uid), { value: entry, enumerable: true, configurable: true, writable: true });
             }
             const fields = session.isNew ? Object.keys(entry) : [...session.changes];
+            if (session.isNew || session.categoryDraft !== session.categoryBaseline) {
+                const currentCategory = entryCategory(latest, uid);
+                if (!session.isNew && currentCategory !== session.categoryBaseline && currentCategory !== session.categoryDraft) {
+                    throw new EntryStoreError('这个条目的分类已在其他位置改变，请重新读取后处理。', 'conflict');
+                }
+                assignEntryCategory(latest, uid, session.categoryDraft);
+            }
             if (session.isNew) reserveBookWatermark(latest, Number(uid));
             this.api.synchronizeOriginalData(latest, uid, entry, fields, { create: session.isNew });
             this.settings.reserve(session.book, Number(uid));
@@ -334,12 +363,13 @@ export class EntryStore {
             this.ensureCurrent(session);
             this.checkCache(session, cached, latest);
             const current = ownEntry(latest, session.uid);
-            if (!object(current) || !sameValue(current, session.baseline)) {
+            if (!object(current) || !sameValue(current, session.baseline) || entryCategory(latest, session.uid) !== session.categoryBaseline) {
                 throw new EntryStoreError('原条目已在其他位置改变或删除，当前未执行删除。请重新读取。', 'conflict');
             }
             this.settings.reserve(session.book, Number(session.uid));
             if (Number.isInteger(Number(session.uid)) && Number(session.uid) >= 0 && Number(session.uid) < UID_LIMIT) reserveBookWatermark(latest, Number(session.uid));
             delete latest.entries[session.uid];
+            assignEntryCategory(latest, session.uid, '');
             this.api.synchronizeOriginalData(latest, session.uid, current, [], { remove: true });
             session.pending = { kind: 'delete', uid: session.uid, data: clone(latest), isNew: false };
             const accepted = await this.api.writeBook(session.book, latest);

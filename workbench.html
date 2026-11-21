@@ -1,25 +1,36 @@
 <section id="lorebook-director-workbench" class="wb-app" data-theme="tavern" aria-label="回声书台">
-    <header class="wb-header" data-wb="header">
+    <aside id="wb-sidebar" class="wb-sidebar" data-wb="sidebar" aria-label="插件功能导航">
         <div class="wb-brand"><img class="wb-brand-mark" data-wb="brand" alt="" aria-hidden="true"><h1 class="wb-brand-name">回声书台</h1></div>
-        <div class="wb-header-actions">
-            <button type="button" class="wb-icon-button" data-wb="theme" aria-label="主题与外观"></button>
-            <button type="button" class="wb-icon-button" data-wb="close" aria-label="关闭工作台"></button>
+        <div class="wb-scroll-shell wb-fill-scroll">
+            <nav class="wb-navigation" data-wb="tabs" data-wb-scroll aria-label="功能页面">
+                <button type="button" id="wb-tab-entries" class="wb-nav-item" data-wb="entries-tab" aria-current="page">世界书工作台</button>
+                <button type="button" id="wb-tab-scheduler" class="wb-nav-item" data-wb="scheduler-tab">调度器</button>
+                <button type="button" id="wb-tab-api" class="wb-nav-item" data-wb="api-tab">调度器 API 设置</button>
+            </nav>
         </div>
-    </header>
-    <div class="wb-context" data-wb="context"><span data-wb="context-name"></span><span class="wb-badge">世界书工作台</span></div>
-    <nav class="wb-tabs" data-wb="tabs" role="tablist" aria-label="工作台功能">
-        <button type="button" id="wb-tab-entries" class="wb-tab" data-wb="entries-tab" role="tab" aria-selected="true" aria-controls="wb-main-panel">条目</button>
-        <button type="button" id="wb-tab-scheduler" class="wb-tab" data-wb="scheduler-tab" role="tab" aria-selected="false" aria-controls="wb-main-panel">调度器</button>
-    </nav>
-    <div class="wb-editor-top" data-wb="editor-top" hidden></div>
-    <main id="wb-main-panel" class="wb-main-view" data-wb="view" role="tabpanel" aria-labelledby="wb-tab-entries" tabindex="-1"></main>
-    <div class="wb-editor-actions" data-wb="editor-actions" hidden></div>
-    <footer class="wb-footer" data-wb="footer">浏览与切换不自动挂载；保存直接修改原世界书。</footer>
+        <div class="wb-sidebar-tools">
+            <button type="button" class="wb-button wb-text" data-wb="theme">主题与外观</button>
+            <button type="button" class="wb-button wb-text" data-wb="nav-close">收起导航</button>
+        </div>
+    </aside>
+    <button type="button" class="wb-nav-backdrop" data-wb="nav-backdrop" aria-label="收起功能导航" hidden></button>
+    <div class="wb-page">
+        <header class="wb-header" data-wb="header">
+            <button type="button" class="wb-icon-button" data-wb="nav-toggle" aria-label="展开或收起功能导航" aria-controls="wb-sidebar" aria-expanded="true"></button>
+            <h2 id="wb-page-title" data-wb="page-title">世界书列表</h2>
+            <button type="button" class="wb-icon-button" data-wb="close" aria-label="关闭工作台"></button>
+        </header>
+        <div class="wb-context" data-wb="context"><span data-wb="context-name"></span></div>
+        <div class="wb-editor-top" data-wb="editor-top" hidden></div>
+        <main id="wb-main-panel" class="wb-main-view" data-wb="view" aria-labelledby="wb-page-title" tabindex="-1"></main>
+        <div class="wb-page-actions" data-wb="editor-actions" hidden></div>
+        <footer class="wb-footer" data-wb="footer">浏览与切换不自动挂载；保存直接修改原世界书。</footer>
+    </div>
     <div class="wb-sheet-layer" data-wb="sheet-layer" hidden>
         <button type="button" class="wb-backdrop" data-wb="sheet-close" aria-label="关闭操作面板" tabindex="-1"></button>
         <section class="wb-sheet" data-wb="sheet" role="dialog" aria-modal="true" aria-labelledby="wb-sheet-title">
             <header class="wb-sheet-head"><h2 id="wb-sheet-title" data-wb="sheet-title"></h2><button type="button" class="wb-icon-button" data-wb="sheet-close" aria-label="关闭操作面板"></button></header>
-            <div class="wb-sheet-body" data-wb="sheet-body"></div>
+            <div class="wb-scroll-shell wb-sheet-scroll"><div class="wb-sheet-body" data-wb="sheet-body" data-wb-scroll></div></div>
         </section>
     </div>
     <div class="wb-toast" data-wb="toast" role="status" aria-live="polite" hidden></div>

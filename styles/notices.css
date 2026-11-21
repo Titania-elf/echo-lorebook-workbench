@@ -1,0 +1,59 @@
+#echo-scheduler-notifications {
+    position: fixed;
+    inset: calc(env(safe-area-inset-top, 0px) + 12px) 12px auto;
+    z-index: 2147483000;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: min(460px, calc(100vw - 24px));
+    max-height: calc(100dvh - 24px);
+    margin: 0 auto;
+    padding: 0;
+    overflow: visible;
+    border: 0;
+    background: transparent;
+    color: var(--SmartThemeBodyColor, #eee);
+    font-family: inherit;
+    font-size: 13px;
+    line-height: 1.6;
+    pointer-events: none;
+}
+
+#echo-scheduler-notifications .echo-scheduler-notice {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 12px 14px;
+    border: 1px solid var(--SmartThemeBorderColor, #777);
+    border-inline-start: 3px solid #cfaa6d;
+    border-radius: 10px;
+    background: var(--SmartThemeBlurTintColor, #26232b);
+    backdrop-filter: blur(18px);
+    box-shadow: 0 4px 20px #0004;
+    pointer-events: auto;
+}
+
+#echo-scheduler-notifications .echo-scheduler-notice > div {
+    flex: 1;
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+#echo-scheduler-notifications .echo-scheduler-notice button {
+    flex: 0 0 26px;
+    min-width: 26px;
+    min-height: 26px;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+}
+
+#echo-scheduler-notifications .echo-scheduler-notice button:focus-visible {
+    outline: 2px solid currentColor;
+    outline-offset: 2px;
+}

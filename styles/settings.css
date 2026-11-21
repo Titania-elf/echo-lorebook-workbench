@@ -260,7 +260,7 @@
     border-radius: 10px;
     background: var(--wb-field-bg);
     color: var(--wb-text);
-    font-family: var(--wb-body-font);
+    font-family: inherit;
     font-size: 16px;
     line-height: 1.5;
 }
@@ -285,11 +285,6 @@
 
 #lorebook-director .wb-brand {
     margin-block: 4px 12px;
-}
-
-#lorebook-director .ld-content > .wb-button.wb-primary {
-    width: 100%;
-    margin-block: 12px;
 }
 
 @media (min-width: 560px) {

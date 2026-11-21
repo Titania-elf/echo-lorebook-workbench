@@ -1,7 +1,8 @@
 import { createGenerationParameters } from '../../../openai.js';
+import { selectedAPIScheme, customAPIData } from './api-connections.js';
 
 /** Send directly through ST's backend, without Generate/quiet-prompt recursion or global setting changes. */
-export async function requestModel(context, config, messages, parentSignal, maxTokens = 1800) {
+export async function requestModel(context, config, messages, parentSignal, maxTokens = 1800, { onDispatch = () => {} } = {}) {
     const controller = new AbortController();
     const onAbort = () => controller.abort(parentSignal.reason || new Error('请求已取消。'));
     parentSignal.addEventListener('abort', onAbort, { once: true });
@@ -15,8 +16,25 @@ export async function requestModel(context, config, messages, parentSignal, maxT
     });
     const send = async () => {
         if (controller.signal.aborted) throw controller.signal.reason;
+        if (typeof context.ChatCompletionService?.sendRequest !== 'function') throw new Error('酒馆的辅助请求服务尚未准备好。');
         let result;
-        if (config.profileId) {
+        const scheme = selectedAPIScheme(config);
+        if (scheme?.source === 'custom') {
+            const data = {
+                ...customAPIData(scheme), model: scheme.model, messages: structuredClone(messages),
+                max_tokens: maxTokens, temperature: 0.2, stream: false, n: 1,
+            };
+            onDispatch({ model: scheme.model });
+            result = await context.ChatCompletionService.sendRequest(data, true, controller.signal);
+        } else if (!scheme && (config.apiMode === 'profile' || (!config.apiMode && config.profileId))) {
+            if (!config.profileId || !context.ConnectionManagerRequestService?.sendRequest) {
+                throw new Error('所选酒馆连接已失效，请在调度器 API 设置中重新选择。');
+            }
+            const profiles = context.ConnectionManagerRequestService.getSupportedProfiles();
+            const profile = profiles.find(value => value.id === config.profileId);
+            if (!profile) throw new Error('所选酒馆连接已失效，请在调度器 API 设置中重新选择。');
+            // This service may still prepare a saved preset before making its HTTP call.
+            onDispatch({ model: profile.model || profile.name || '', submittedOnly: true });
             // Saved connection profiles keep provider selection and secrets inside SillyTavern.
             result = await context.ConnectionManagerRequestService.sendRequest(config.profileId, messages, maxTokens, {
                 stream: false, signal: controller.signal, extractData: true, includePreset: true,
@@ -26,7 +44,7 @@ export async function requestModel(context, config, messages, parentSignal, maxT
             });
         } else {
             if (context.mainApi !== 'openai') {
-                throw new Error('“当前连接”仅支持聊天补全；请在下拉框选择一个已保存的连接配置。');
+                throw new Error('跟随主连接需要酒馆使用聊天补全；也可以选择已有连接或新建独立 API 方案。');
             }
             const settings = structuredClone(context.chatCompletionSettings);
             Object.assign(settings, {
@@ -40,6 +58,7 @@ export async function requestModel(context, config, messages, parentSignal, maxT
             for (const key of ['tools', 'tool_choice', 'stop', 'logit_bias', 'logprobs', 'top_logprobs']) delete data[key];
             data.stream = false;
             data.n = 1;
+            onDispatch({ model });
             result = await context.ChatCompletionService.sendRequest(data, true, controller.signal);
         }
         if (controller.signal.aborted) throw controller.signal.reason;
@@ -50,6 +69,10 @@ export async function requestModel(context, config, messages, parentSignal, maxT
     };
     try {
         return await Promise.race([send(), cancelled]);
+    } catch (error) {
+        if (controller.signal.aborted) throw controller.signal.reason || error;
+        if (error.cause?.message) throw new Error(`${error.message}：${error.cause.message}`, { cause: error });
+        throw error;
     } finally {
         clearTimeout(timer);
         parentSignal.removeEventListener('abort', onAbort);

@@ -1,0 +1,1173 @@
+/* Feature navigation and compact editing surfaces. Text inherits the host theme. */
+#lorebook-director-workbench.wb-app {
+    --wb-gutter: 20px;
+    --wb-constant: color-mix(in srgb, #668ac5 75%, var(--wb-text));
+    display: grid;
+    grid-template-columns: var(--wb-sidebar-width) minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+}
+
+#lorebook-director-workbench[data-nav="closed"] {
+    grid-template-columns: 0 minmax(0, 1fr);
+}
+
+#lorebook-director-workbench .wb-sidebar {
+    grid-column: 1;
+    grid-row: 1;
+    z-index: 30;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    width: var(--wb-sidebar-width);
+    height: 100%;
+    min-width: 0;
+    min-height: 0;
+    padding: calc(18px + var(--wb-safe-top)) 10px calc(12px + var(--wb-safe-bottom));
+    border-inline-end: 1px solid var(--wb-border);
+    background: var(--wb-soft);
+    overflow: hidden;
+}
+
+#lorebook-director-workbench[data-nav="closed"] .wb-sidebar {
+    visibility: hidden;
+    pointer-events: none;
+}
+
+#lorebook-director-workbench .wb-sidebar .wb-brand {
+    gap: 7px;
+    padding-inline: 4px;
+}
+
+#lorebook-director-workbench .wb-sidebar .wb-brand-mark {
+    width: 27px;
+    height: 27px;
+    flex-basis: 27px;
+}
+
+#lorebook-director-workbench .wb-sidebar .wb-brand-name {
+    font-size: 1em;
+    font-weight: 600;
+}
+
+#lorebook-director-workbench .wb-navigation {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+#lorebook-director-workbench .wb-nav-item {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 7px;
+    width: 100%;
+    min-height: 42px;
+    padding: 9px 7px;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--wb-muted);
+    font-size: .8em;
+    line-height: 1.5;
+    text-align: start;
+}
+
+#lorebook-director-workbench .wb-nav-item .wb-icon {
+    width: 17px;
+    height: 17px;
+}
+
+#lorebook-director-workbench .wb-nav-item[aria-current="page"] {
+    border-color: var(--wb-selection-border);
+    background: var(--wb-selection-gradient);
+    color: var(--wb-accent);
+    font-weight: 600;
+}
+
+#lorebook-director-workbench .wb-sidebar-tools {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    padding-block-start: 9px;
+    border-top: 1px solid var(--wb-border);
+}
+
+#lorebook-director-workbench .wb-sidebar-tools .wb-button {
+    justify-content: flex-start;
+    width: 100%;
+    font-size: .76em;
+}
+
+#lorebook-director-workbench .wb-page {
+    grid-column: 2;
+    grid-row: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+}
+
+#lorebook-director-workbench .wb-header {
+    justify-content: flex-start;
+    min-height: 54px;
+    gap: 8px;
+    padding-block: calc(7px + var(--wb-safe-top)) 7px;
+    padding-inline: max(var(--wb-gutter), var(--wb-safe-left)) max(var(--wb-gutter), var(--wb-safe-right));
+    border-bottom: 1px solid var(--wb-border);
+}
+
+#lorebook-director-workbench .wb-header h2 {
+    flex: 1 1 0;
+    min-width: 0;
+    font-size: 1.06em;
+    font-weight: 600;
+    text-wrap: initial;
+}
+
+#lorebook-director-workbench .wb-context {
+    min-height: 0;
+    padding-block: 5px;
+    font-size: .73em;
+    line-height: 1.4;
+}
+
+#lorebook-director-workbench .wb-main-view {
+    display: flex;
+    flex-direction: column;
+    padding: 0;
+    overflow: hidden;
+}
+
+#lorebook-director-workbench .wb-feature-view {
+    display: flex;
+    flex: 1 1 0;
+    flex-direction: column;
+    width: 100%;
+    height: 100%;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+}
+
+#lorebook-director-workbench .wb-button {
+    min-width: 0;
+    min-height: 38px;
+    padding: 8px 11px;
+    font-size: .82em;
+}
+
+#lorebook-director-workbench .wb-icon-button {
+    width: 36px;
+    height: 36px;
+    min-width: 36px;
+    min-height: 36px;
+    padding: 7px;
+}
+
+#lorebook-director-workbench :is(.wb-button, .wb-icon-button) .wb-icon {
+    width: 17px;
+    height: 17px;
+}
+
+#lorebook-director-workbench .wb-browse-toolbar {
+    display: flex;
+    flex: 0 0 auto;
+    flex-direction: column;
+    gap: 10px;
+    min-width: 0;
+    padding: 12px max(var(--wb-gutter), var(--wb-safe-right)) 12px max(var(--wb-gutter), var(--wb-safe-left));
+    border-bottom: 1px solid var(--wb-border);
+}
+
+#lorebook-director-workbench :is(.wb-browse-search, .wb-book-source-row) {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+}
+
+#lorebook-director-workbench .wb-browse-search > .wb-search {
+    flex: 1 1 0;
+    width: auto;
+}
+
+#lorebook-director-workbench .wb-browse-search > .wb-button {
+    flex: 0 0 auto;
+}
+
+#lorebook-director-workbench .wb-search {
+    gap: 7px;
+    min-height: 38px;
+    padding-inline: 10px 3px;
+}
+
+#lorebook-director-workbench .wb-search input {
+    min-height: 36px;
+    padding-block: 6px;
+    font-size: .9em;
+}
+
+#lorebook-director-workbench .wb-search > .wb-icon {
+    width: 17px;
+    height: 17px;
+}
+
+#lorebook-director-workbench .wb-pill-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 5px;
+    min-width: 0;
+}
+
+#lorebook-director-workbench .wb-pill-row > .wb-help {
+    margin-inline-start: auto;
+    font-size: .72em;
+}
+
+#lorebook-director-workbench .wb-button.wb-pill {
+    flex: 0 0 auto;
+    gap: 5px;
+    min-width: 0;
+    min-height: 28px;
+    padding: 5px 9px;
+    border-radius: 999px;
+    font-size: .75em;
+    line-height: 1.3;
+    white-space: nowrap;
+}
+
+#lorebook-director-workbench .wb-pill small {
+    font-size: .9em;
+    opacity: .8;
+}
+
+#lorebook-director-workbench .wb-category-strip {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 5px;
+    min-width: 0;
+    padding-block: 1px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-inline: contain;
+    touch-action: pan-x pinch-zoom;
+    -webkit-overflow-scrolling: touch;
+}
+
+#lorebook-director-workbench .wb-category-strip > button {
+    touch-action: pan-x pinch-zoom;
+    user-select: none;
+}
+
+#lorebook-director-workbench .wb-constant-pill::before {
+    content: "";
+    width: 5px;
+    height: 5px;
+    flex: 0 0 auto;
+    border-radius: 50%;
+    background: var(--wb-constant);
+}
+
+#lorebook-director-workbench .wb-constant-pill[aria-pressed="true"] {
+    border-color: var(--wb-constant);
+    background: color-mix(in srgb, var(--wb-surface) 92%, var(--wb-constant));
+    color: var(--wb-constant);
+}
+
+#lorebook-director-workbench .wb-category-add {
+    border-style: dashed;
+    color: var(--wb-muted);
+}
+
+#lorebook-director-workbench .wb-category-add .wb-icon {
+    width: 13px;
+    height: 13px;
+}
+
+#lorebook-director-workbench .wb-scroll-shell {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+}
+
+#lorebook-director-workbench .wb-fill-scroll {
+    flex: 1 1 0;
+}
+
+#lorebook-director-workbench .wb-scroll-shell > [data-wb-scroll] {
+    flex: 1 1 auto;
+    width: 100%;
+    min-width: 0;
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+}
+
+#lorebook-director-workbench :is([data-wb-scroll], [data-wb-horizontal]) {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+}
+
+#lorebook-director-workbench :is([data-wb-scroll], [data-wb-horizontal])::-webkit-scrollbar {
+    display: none;
+    width: 0;
+    height: 0;
+}
+
+#lorebook-director-workbench .wb-scroll-rail {
+    position: absolute;
+    z-index: 5;
+    inset-block: 6px;
+    inset-inline-end: 3px;
+    width: 2px;
+    border: 0;
+    background: transparent;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 140ms ease;
+}
+
+#lorebook-director-workbench .wb-scroll-thumb {
+    position: absolute;
+    inset-inline-start: 0;
+    display: block;
+    width: 2px;
+    min-width: 0;
+    border: 0;
+    border-radius: 0;
+    background: color-mix(in srgb, var(--wb-accent) 70%, transparent);
+}
+
+#lorebook-director-workbench .wb-scrolling > .wb-scroll-rail {
+    opacity: 1;
+}
+
+#lorebook-director-workbench .wb-browse-content {
+    padding: 4px max(var(--wb-gutter), var(--wb-safe-right)) 16px max(var(--wb-gutter), var(--wb-safe-left));
+}
+
+#lorebook-director-workbench .wb-group-heading {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 15px 0 5px;
+    font-size: .86em;
+    font-weight: 600;
+}
+
+#lorebook-director-workbench .wb-group-heading small {
+    color: var(--wb-muted);
+    font-size: .86em;
+    font-weight: 400;
+}
+
+#lorebook-director-workbench .wb-group-note {
+    padding-block: 10px 3px;
+    color: var(--wb-muted);
+    font-size: .78em;
+    line-height: 1.65;
+}
+
+#lorebook-director-workbench .wb-book-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+    min-height: 76px;
+    padding: 14px 3px;
+    border: 0;
+    border-bottom: 1px solid var(--wb-border);
+    border-radius: 0;
+    background: transparent;
+    text-align: start;
+}
+
+#lorebook-director-workbench .wb-entry-card {
+    display: flex;
+    align-items: stretch;
+    gap: 12px;
+    min-width: 0;
+    padding: 13px 3px;
+    border-bottom: 1px solid var(--wb-border);
+}
+
+#lorebook-director-workbench .wb-entry-open {
+    flex: 1 1 0;
+    min-width: 0;
+    padding: 0;
+    background: transparent;
+    text-align: start;
+}
+
+#lorebook-director-workbench .wb-entry-main {
+    gap: 6px;
+}
+
+#lorebook-director-workbench .wb-entry-title {
+    font-size: .94em;
+}
+
+#lorebook-director-workbench .wb-entry-meta {
+    font-size: inherit;
+}
+
+#lorebook-director-workbench .wb-badge {
+    border-radius: 999px;
+    font-size: .7em;
+}
+
+#lorebook-director-workbench :is(.wb-excerpt, .wb-entry-keywords) {
+    color: var(--wb-muted);
+    font-size: .81em;
+    line-height: 1.65;
+}
+
+#lorebook-director-workbench .wb-entry-keywords {
+    display: -webkit-box;
+    overflow: hidden;
+    overflow-wrap: anywhere;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 1;
+}
+
+#lorebook-director-workbench .wb-entry-side {
+    display: flex;
+    flex: 0 0 auto;
+    flex-direction: column;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 8px;
+    min-width: 64px;
+}
+
+#lorebook-director-workbench .wb-entry-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 5px;
+    min-height: 30px;
+    padding: 0;
+    font-size: .7em;
+    color: var(--wb-muted);
+}
+
+#lorebook-director-workbench .wb-toggle-track {
+    position: relative;
+    display: inline-block;
+    width: 28px;
+    height: 16px;
+    flex: 0 0 28px;
+    border: 1px solid var(--wb-border);
+    border-radius: 999px;
+    background: var(--wb-soft-strong);
+}
+
+#lorebook-director-workbench .wb-toggle-track::before {
+    content: "";
+    position: absolute;
+    top: 1px;
+    inset-inline-start: 1px;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--wb-switch-thumb);
+}
+
+#lorebook-director-workbench .wb-entry-toggle[aria-checked="true"] .wb-toggle-track {
+    border-color: var(--wb-accent);
+    background: var(--wb-accent);
+}
+
+#lorebook-director-workbench .wb-entry-toggle[aria-checked="true"] .wb-toggle-track::before {
+    inset-inline-start: 13px;
+}
+
+#lorebook-director-workbench .wb-entry-card[data-enabled="false"] .wb-entry-title {
+    color: var(--wb-muted);
+}
+
+#lorebook-director-workbench .wb-entry-card[data-current="true"] {
+    background: var(--wb-selection-gradient);
+}
+
+#lorebook-director-workbench .wb-row-link {
+    flex: 0 0 auto;
+    min-height: 30px;
+    padding: 5px 2px;
+    background: transparent;
+    color: var(--wb-accent);
+    font-size: .76em;
+    white-space: nowrap;
+}
+
+#lorebook-director-workbench .wb-pagination {
+    flex: 0 0 auto;
+    padding: 8px max(var(--wb-gutter), var(--wb-safe-right)) 8px max(var(--wb-gutter), var(--wb-safe-left));
+    border-top: 1px solid var(--wb-border);
+    font-size: inherit;
+}
+
+#lorebook-director-workbench .wb-draft-notice {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 4px 9px;
+    border-radius: 8px;
+    background: var(--wb-selection-gradient);
+    font-size: .76em;
+}
+
+#lorebook-director-workbench .wb-draft-notice .wb-button {
+    min-height: 28px;
+    padding: 4px 6px;
+    font-size: 1em;
+    white-space: nowrap;
+}
+
+#lorebook-director-workbench .wb-editor-source {
+    flex-wrap: nowrap;
+    justify-content: flex-start;
+    gap: 10px;
+    padding-block: 9px;
+    border-bottom: 1px solid var(--wb-border);
+    font-size: inherit;
+}
+
+#lorebook-director-workbench .wb-option-main {
+    font-size: inherit;
+}
+
+#lorebook-director-workbench .wb-option-main strong {
+    font-size: .87em;
+}
+
+#lorebook-director-workbench .wb-option-meta {
+    font-size: .73em;
+}
+
+#lorebook-director-workbench .wb-entry-step {
+    display: flex;
+    flex: 0 0 auto;
+    gap: 4px;
+}
+
+#lorebook-director-workbench .wb-entry-step .wb-button {
+    min-width: 40px;
+    padding-inline: 7px;
+    font-size: .75em;
+}
+
+#lorebook-director-workbench .wb-editor-form {
+    height: 100%;
+    min-height: 0;
+    gap: 10px;
+    padding: 10px max(var(--wb-gutter), var(--wb-safe-right)) 12px max(var(--wb-gutter), var(--wb-safe-left));
+}
+
+#lorebook-director-workbench .wb-editor-form > :not(.wb-body-field) {
+    flex: 0 0 auto;
+}
+
+#lorebook-director-workbench .wb-field {
+    gap: 5px;
+    font-size: inherit;
+}
+
+#lorebook-director-workbench .wb-field > label,
+#lorebook-director-workbench .wb-field-heading label {
+    font-size: .76em;
+    line-height: 1.4;
+    font-weight: 500;
+    color: var(--wb-muted);
+}
+
+#lorebook-director-workbench .wb-field :where(input:not([type="checkbox"]):not([type="radio"]), select, textarea) {
+    min-height: 38px;
+    padding: 7px 9px;
+    border-radius: 8px;
+    font-size: .9em;
+}
+
+#lorebook-director-workbench .wb-field-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 5px;
+    min-width: 0;
+    min-height: 0;
+    flex-wrap: nowrap;
+}
+
+#lorebook-director-workbench .wb-field:has(> input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="hidden"]), > select:not([multiple])) {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(1.4em, auto) max(38px, 2.4em);
+    align-content: start;
+}
+
+#lorebook-director-workbench .wb-field > :where(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="hidden"]), select:not([multiple])) {
+    grid-row: 2;
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    max-height: none;
+    margin: 0;
+    padding: 6px 8px;
+    line-height: 1.5;
+}
+
+#lorebook-director-workbench .wb-field > select:not([multiple]) {
+    padding-inline-end: 22px;
+}
+
+#lorebook-director-workbench .wb-field > label,
+#lorebook-director-workbench .wb-field-heading > label {
+    min-width: 0;
+    margin: 0;
+    white-space: nowrap;
+}
+
+#lorebook-director-workbench .wb-field > label {
+    display: flex;
+    align-items: center;
+}
+
+#lorebook-director-workbench .wb-field-heading > :is(label, button) {
+    flex: 0 0 auto;
+}
+
+#lorebook-director-workbench .wb-editor-meta {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(100px, .45fr) minmax(140px, .6fr);
+    gap: 10px;
+    align-items: end;
+}
+
+#lorebook-director-workbench .wb-keyword-row {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+    align-items: end;
+}
+
+#lorebook-director-workbench .wb-conditional-row {
+    display: flex;
+    align-items: flex-end;
+    gap: 10px;
+}
+
+#lorebook-director-workbench .wb-conditional-row > * {
+    flex: 1 1 0;
+    min-width: 0;
+}
+
+#lorebook-director-workbench .wb-body-field {
+    flex: 1 1 0;
+    min-height: 170px;
+}
+
+#lorebook-director-workbench .wb-body-heading {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    min-height: 26px;
+}
+
+#lorebook-director-workbench .wb-body-heading label {
+    font-size: .85em;
+    font-weight: 500;
+}
+
+#lorebook-director-workbench .wb-body-tools {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+#lorebook-director-workbench .wb-inline-action {
+    min-height: 26px;
+    padding: 4px 5px;
+    background: transparent;
+    color: var(--wb-accent);
+    font-size: .75em;
+    line-height: 1.3;
+    white-space: nowrap;
+}
+
+#lorebook-director-workbench .wb-field-heading .wb-inline-action {
+    min-height: 17px;
+    padding-block: 0;
+    font-size: .68em;
+}
+
+#lorebook-director-workbench .wb-textarea-scroll {
+    flex: 1 1 0;
+    border-radius: 8px;
+}
+
+#lorebook-director-workbench .wb-body-field textarea {
+    field-sizing: fixed;
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    max-height: none;
+    padding: 11px 12px;
+    font-size: 1em;
+    line-height: 1.8;
+    resize: none;
+    overflow-y: auto;
+}
+
+#lorebook-director-workbench .wb-editor-attributes {
+    display: grid;
+    grid-template-columns: minmax(0, 1.5fr) minmax(56px, .45fr) minmax(84px, .7fr) auto;
+    align-items: end;
+    gap: 10px;
+}
+
+#lorebook-director-workbench .wb-probability-field {
+    position: relative;
+    min-width: 0;
+}
+
+#lorebook-director-workbench .wb-probability-field .wb-switch-row {
+    position: absolute;
+    top: -4px;
+    inset-inline-end: 0;
+    width: 28px;
+    min-height: 26px;
+    gap: 0;
+}
+
+#lorebook-director-workbench .wb-probability-field .wb-switch-row > div {
+    display: none;
+}
+
+#lorebook-director-workbench .wb-probability-field .wb-field > label {
+    padding-inline-end: 28px;
+    font-size: .72em;
+}
+
+#lorebook-director-workbench .wb-switch-row {
+    min-height: 38px;
+    gap: 10px;
+}
+
+#lorebook-director-workbench .wb-switch-row label {
+    font-size: .82em;
+}
+
+#lorebook-director-workbench .wb-switch {
+    min-height: 34px;
+    font-size: inherit;
+}
+
+#lorebook-director-workbench .wb-switch:has(> .wb-switch-track) {
+    width: 32px;
+    min-height: 32px;
+    flex-basis: 32px;
+}
+
+#lorebook-director-workbench .wb-switch input[type="checkbox"] {
+    width: 32px;
+    height: 20px;
+    min-width: 32px;
+    min-height: 20px;
+    flex-basis: 32px;
+}
+
+#lorebook-director-workbench .wb-switch input[type="checkbox"]::before {
+    width: 14px;
+    height: 14px;
+    top: 2px;
+    left: 2px;
+}
+
+#lorebook-director-workbench .wb-switch input[type="checkbox"]:checked::before {
+    transform: translateX(12px);
+}
+
+#lorebook-director-workbench .wb-probability-field .wb-switch {
+    width: 28px;
+    min-height: 26px;
+    padding-block: 0;
+    flex-basis: 28px;
+}
+
+#lorebook-director-workbench .wb-probability-field .wb-switch input[type="checkbox"] {
+    width: 22px;
+    height: 14px;
+    min-width: 22px;
+    min-height: 14px;
+    flex-basis: 22px;
+}
+
+#lorebook-director-workbench .wb-probability-field .wb-switch input[type="checkbox"]::before {
+    width: 10px;
+    height: 10px;
+    top: 1px;
+    left: 1px;
+}
+
+#lorebook-director-workbench .wb-probability-field .wb-switch input[type="checkbox"]:checked::before {
+    transform: translateX(8px);
+}
+
+#lorebook-director-workbench .wb-creation-hint {
+    padding-inline-start: 8px;
+    border-inline-start: 2px solid var(--wb-brand-b);
+    color: var(--wb-muted);
+    font-size: .75em;
+    line-height: 1.5;
+}
+
+#lorebook-director-workbench.wb-editor-expanded .wb-editor-form > :is(.wb-editor-meta, .wb-keyword-row, .wb-editor-attributes, .wb-conditional-row, .wb-creation-hint, .wb-field:not(.wb-body-field)) {
+    display: none;
+}
+
+#lorebook-director-workbench .wb-page-actions {
+    flex: 0 0 auto;
+    padding: 10px max(var(--wb-gutter), var(--wb-safe-right)) calc(10px + var(--wb-safe-bottom)) max(var(--wb-gutter), var(--wb-safe-left));
+    border-top: 1px solid var(--wb-border);
+    background: var(--wb-surface);
+}
+
+#lorebook-director-workbench .wb-action-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    min-width: 0;
+}
+
+#lorebook-director-workbench .wb-action-buttons {
+    display: flex;
+    flex: 0 1 auto;
+    align-items: center;
+    gap: 7px;
+    min-width: 0;
+}
+
+#lorebook-director-workbench .wb-action-row.wb-scheduler-footer,
+#lorebook-director-workbench .wb-scheduler-footer .wb-action-buttons {
+    flex-wrap: wrap;
+}
+
+#lorebook-director-workbench .wb-action-buttons .wb-button {
+    white-space: nowrap;
+}
+
+#lorebook-director-workbench .wb-dirty-status {
+    flex: 1 1 0;
+    font-size: .75em;
+    line-height: 1.4;
+}
+
+#lorebook-director-workbench .wb-reading-page,
+#lorebook-director-workbench .wb-api-settings {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    height: 100%;
+    margin: 0;
+    padding: 16px max(var(--wb-gutter), var(--wb-safe-right)) 20px max(var(--wb-gutter), var(--wb-safe-left));
+}
+
+#lorebook-director-workbench :is(.wb-reading-page, .wb-api-settings) > * {
+    flex-shrink: 0;
+}
+
+#lorebook-director-workbench .wb-api-settings .wb-field {
+    max-width: 36em;
+}
+
+#lorebook-director-workbench .wb-settings-section {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding-block-end: 18px;
+    border-bottom: 1px solid var(--wb-border);
+}
+
+#lorebook-director-workbench .wb-settings-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+    align-items: end;
+}
+
+#lorebook-director-workbench .wb-section-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+#lorebook-director-workbench .wb-settings-body {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    min-width: 0;
+}
+
+#lorebook-director-workbench .wb-managed-scroll {
+    flex: 0 1 auto;
+    max-height: min(240px, 30dvh);
+}
+
+#lorebook-director-workbench .wb-managed-list {
+    max-height: none;
+}
+
+#lorebook-director-workbench .wb-managed-option {
+    min-height: 48px;
+    padding-block: 8px;
+}
+
+#lorebook-director-workbench .wb-scene-text {
+    font-size: .9em;
+}
+
+#lorebook-director-workbench :is(.wb-status, .wb-result-reason, .wb-scene-header) {
+    font-size: .82em;
+}
+
+#lorebook-director-workbench .wb-result-heading > p {
+    font-size: .78em;
+}
+
+#lorebook-director-workbench .wb-result-meta {
+    font-size: inherit;
+}
+
+#lorebook-director-workbench .wb-result-open {
+    font-size: .94em;
+}
+
+#lorebook-director-workbench .wb-segment .wb-button {
+    min-height: 28px;
+    padding: 5px 9px;
+    border-radius: 999px;
+    font-size: .75em;
+}
+
+#lorebook-director-workbench .wb-details > summary {
+    min-height: 42px;
+    font-size: .87em;
+}
+
+#lorebook-director-workbench .wb-template-option {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+    padding-block: 12px;
+    border-top: 1px solid var(--wb-border);
+}
+
+#lorebook-director-workbench .wb-template-preview {
+    margin: 0;
+    white-space: pre-wrap;
+    font-size: .87em;
+    line-height: 1.8;
+}
+
+#lorebook-director-workbench .wb-sheet-scroll {
+    flex: 1 1 auto;
+}
+
+#lorebook-director-workbench .wb-sheet-head :is(h2, h3) {
+    font-size: 1.08em;
+}
+
+#lorebook-director-workbench .wb-raw-scroll {
+    height: min(360px, 48dvh);
+}
+
+#lorebook-director-workbench .wb-raw-scroll textarea {
+    field-sizing: fixed;
+    min-height: 0;
+    max-height: none;
+    resize: none;
+}
+
+#lorebook-director-workbench .wb-footer {
+    font-size: .7em;
+}
+
+#lorebook-director-workbench .wb-toast {
+    font-size: .82em;
+    pointer-events: none;
+}
+
+#lorebook-director-workbench:has(.wb-page-actions:not([hidden])) .wb-toast {
+    bottom: calc(94px + var(--wb-safe-bottom));
+}
+
+#lorebook-director-workbench .wb-nav-backdrop {
+    position: absolute;
+    z-index: 20;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    border: 0;
+    border-radius: 0;
+    background: var(--wb-veil);
+    touch-action: none;
+}
+
+#lorebook-director-workbench[data-compact="true"] {
+    --wb-gutter: 12px;
+    grid-template-columns: 0 minmax(0, 1fr);
+}
+
+#lorebook-director-workbench[data-compact="true"] .wb-sidebar {
+    position: absolute;
+    inset-block: 0;
+    inset-inline-start: 0;
+    max-width: calc(100% - 48px);
+    padding-inline-start: max(10px, var(--wb-safe-left));
+}
+
+#lorebook-director-workbench[data-compact="true"] .wb-browse-toolbar {
+    gap: 8px;
+    padding-block: 9px;
+}
+
+#lorebook-director-workbench[data-compact="true"] .wb-browse-search {
+    gap: 7px;
+}
+
+#lorebook-director-workbench[data-compact="true"] .wb-browse-search > .wb-button {
+    padding-inline: 8px;
+    font-size: .76em;
+}
+
+#lorebook-director-workbench[data-compact="true"] .wb-browse-search > .wb-button .wb-icon {
+    display: none;
+}
+
+#lorebook-director-workbench[data-compact="true"] .wb-editor-source {
+    gap: 6px;
+    padding-block: 7px;
+}
+
+#lorebook-director-workbench[data-compact="true"] .wb-editor-source > .wb-button {
+    padding-inline: 5px;
+    font-size: .72em;
+}
+
+#lorebook-director-workbench[data-compact="true"] .wb-entry-step {
+    gap: 3px;
+}
+
+#lorebook-director-workbench[data-compact="true"] .wb-entry-step .wb-button {
+    min-width: 34px;
+    padding-inline: 4px;
+    font-size: .7em;
+}
+
+#lorebook-director-workbench[data-compact="true"] .wb-editor-form {
+    gap: 8px;
+    padding-block: 8px 10px;
+}
+
+#lorebook-director-workbench[data-compact="true"] .wb-editor-meta {
+    grid-template-columns: minmax(0, 1fr) minmax(96px, .6fr) minmax(132px, .8fr);
+    gap: 6px;
+}
+
+#lorebook-director-workbench[data-compact="true"] .wb-field > :where(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="hidden"]), select:not([multiple])) {
+    font-size: .85em;
+}
+
+#lorebook-director-workbench[data-compact="true"] .wb-editor-attributes {
+    grid-template-columns: minmax(0, 1fr) 60px 96px auto;
+    gap: 6px;
+}
+
+#lorebook-director-workbench[data-compact="true"] .wb-editor-attributes .wb-button {
+    padding-inline: 5px;
+    font-size: .75em;
+}
+
+#lorebook-director-workbench[data-compact="true"] :is(.wb-keyword-row, .wb-conditional-row) {
+    gap: 6px;
+}
+
+#lorebook-director-workbench[data-compact="true"] .wb-conditional-row .wb-switch-row label {
+    font-size: .72em;
+}
+
+#lorebook-director-workbench[data-compact="true"] .wb-page-actions {
+    padding-block-start: 8px;
+}
+
+#lorebook-director-workbench[data-compact="true"] .wb-action-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+}
+
+#lorebook-director-workbench[data-compact="true"] .wb-entry-actions .wb-action-buttons {
+    display: grid;
+    grid-template-columns: 1fr .65fr 1.05fr 1.4fr;
+    gap: 5px;
+}
+
+#lorebook-director-workbench[data-compact="true"] .wb-entry-actions .wb-create-actions {
+    grid-template-columns: 1fr 1.6fr;
+}
+
+#lorebook-director-workbench[data-compact="true"] .wb-action-buttons .wb-button {
+    min-height: 38px;
+    padding-inline: 4px;
+    font-size: .75em;
+    white-space: normal;
+}
+
+#lorebook-director-workbench[data-compact="true"] .wb-action-buttons .wb-icon {
+    display: none;
+}
+
+#lorebook-director-workbench[data-compact="true"] .wb-scheduler-footer .wb-action-buttons {
+    flex-wrap: wrap;
+}
+
+#lorebook-director-workbench[data-compact="true"] .wb-scheduler-footer .wb-button {
+    flex: 1 1 auto;
+    padding-inline: 8px;
+}
+
+@media (hover: hover) {
+    #lorebook-director-workbench :is(.wb-nav-item, .wb-book-row, .wb-entry-card):hover {
+        background: var(--wb-soft);
+    }
+}
+
+@media (max-width: 540px) {
+    #lorebook-director-workbench[data-compact="true"] .wb-editor-meta {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    #lorebook-director-workbench[data-compact="true"] .wb-editor-meta > :first-child {
+        grid-column: 1 / -1;
+    }
+    #lorebook-director-workbench[data-compact="true"] .wb-editor-attributes {
+        grid-template-columns: minmax(0, 1fr) minmax(56px, .35fr) minmax(92px, .55fr);
+    }
+    #lorebook-director-workbench[data-compact="true"] .wb-editor-attributes > .wb-button {
+        grid-column: 1 / -1;
+        justify-self: end;
+        min-height: 28px;
+    }
+}

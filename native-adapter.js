@@ -2,9 +2,12 @@ import {
     createWorldInfoEntry, loadWorldInfo, worldInfoCache, world_info, selected_world_info,
     newWorldInfoEntryDefinition, world_info_position, world_info_logic,
     originalWIDataKeyMap, splitKeywordsAndRegexes,
+    checkWorldInfo, world_info_include_names, world_info_max_recursion_steps,
 } from '../../../world-info.js';
 import { getCharaFilename } from '../../../utils.js';
-import { MODULE } from './core.js';
+import { getTagKeyForEntity } from '../../../tags.js';
+import { promptManager } from '../../../openai.js';
+import { MODULE, entryId, entryVersion } from './core.js';
 import { clone } from './workbench-state.js';
 
 export class WorldbookError extends Error {
@@ -82,6 +85,7 @@ export class NativeWorldbookAdapter {
         this.logic = world_info_logic;
         this.records = new Map();
         this.directoryLoaded = false;
+        this.recovering = false;
         this.synchronizeOriginalData = synchronizeOriginalData;
     }
 
@@ -150,6 +154,112 @@ export class NativeWorldbookAdapter {
         add(context.chatMetadata?.world_info, '聊天挂载', 3);
         add(context.powerUserSettings?.persona_description_lorebook, '人设挂载', 3);
         return result;
+    }
+
+    schedulerBooks(books) {
+        const mounted = this.associations();
+        return books.filter(name => mounted.has(name)).sort();
+    }
+
+    schedulerApplicable(entry, type = 'normal') {
+        if (Array.isArray(entry.triggers) && entry.triggers.length && !entry.triggers.includes(type)) return false;
+        const filter = entry.characterFilter;
+        if (Array.isArray(filter?.names) && filter.names.length) {
+            const included = filter.names.includes(getCharaFilename(this.getContext().characterId));
+            if (filter.isExclude ? included : !included) return false;
+        }
+        if (Array.isArray(filter?.tags) && filter.tags.length) {
+            const context = this.getContext();
+            const tagKey = getTagKeyForEntity(context.characterId);
+            const tags = tagKey ? context.tagMap?.[tagKey] : null;
+            if (Array.isArray(tags)) {
+                const included = tags.some(tag => filter.tags.includes(tag));
+                if (filter.isExclude ? included : !included) return false;
+            }
+        }
+        const decorators = Array.isArray(entry.decorators) ? entry.decorators : [];
+        return !decorators.includes('@@dont_activate') || decorators.includes('@@activate');
+    }
+
+    assertSchedulerSlots(included, type) {
+        if (this.getContext().mainApi !== 'openai' || !included.length) return;
+        if (!promptManager) throw new WorldbookError('酒馆的正文预设尚未准备好。');
+        for (const position of new Set(included.map(item => item.position))) {
+            const id = position === 'before' ? 'worldInfoBefore' : 'worldInfoAfter';
+            const name = position === 'before' ? '世界书之前' : '世界书之后';
+            const prompt = promptManager.getPromptById(id);
+            if (promptManager.isPromptDisabledForActiveCharacter(id)
+                || (prompt && !promptManager.shouldTrigger(prompt, type))) {
+                throw new WorldbookError(`正文预设中的“${name}”已关闭或不适用于本次生成，请先启用该位置。`);
+            }
+        }
+    }
+
+    /** Read disk without accepting it into the editor/cache; a failed native load is not an empty book. */
+    async schedulerSnapshot(books, { signal } = {}) {
+        const mounted = this.schedulerBooks(books);
+        const sources = new Map();
+        if (!mounted.length) return { books: mounted, sources, versions: new Map() };
+        const records = await this.directory({ fresh: true, signal });
+        for (const name of mounted) {
+            if (!records.some(record => record.name === name)) throw new WorldbookError(`托管世界书《${name}》已删除或改名。`);
+        }
+        const saved = await Promise.all(mounted.map(async name => [
+            name, await this.readBook(name, { fresh: true, signal, requireExisting: false }),
+        ]));
+        for (const [world, data] of saved) {
+            for (const value of Object.values(data.entries)) {
+                if (!object(value) || !['string', 'number'].includes(typeof value.uid)) {
+                    throw new WorldbookError(`《${world}》含有无法识别 ID 的条目，已跳过本轮调度。`);
+                }
+                const source = { ...value, world };
+                const id = entryId(source);
+                if (sources.has(id)) throw new WorldbookError(`《${world}》含有重复条目 ID，已跳过本轮调度。`);
+                sources.set(id, source);
+            }
+        }
+        return { books: mounted, sources, versions: new Map([...sources].map(([id, entry]) => [id, entryVersion(entry)])) };
+    }
+
+    /**
+     * Rare recovery after a scan already skipped masked entries. A fresh native scan also
+     * works when the outer scan reached its recursion cap. Capture its expanded entries
+     * before the builder and leave formatting/regex/timers to the original scan once.
+     */
+    async recoverSchedulerScan(input, contextSize, type, parentEntries, guard) {
+        if (this.recovering) throw new WorldbookError('另一个原生恢复正在进行。');
+        guard();
+        const context = this.getContext();
+        const fields = context.getCharacterCardFields();
+        const globalScanData = {
+            personaDescription: fields.persona, characterDescription: fields.description,
+            characterPersonality: fields.personality, characterDepthPrompt: fields.charDepthPrompt,
+            scenario: fields.scenario, creatorNotes: fields.creatorNotes, trigger: type,
+        };
+        const chat = input.map(message => world_info_include_names ? `${message.name}: ${message.mes}` : message.mes).reverse();
+        let sorted = null;
+        let recovered = null;
+        const capture = args => {
+            if (args.sortedEntries === parentEntries) return;
+            guard();
+            if (sorted && sorted !== args.sortedEntries) throw new WorldbookError('原生恢复期间出现了另一轮世界书扫描。');
+            sorted = args.sortedEntries;
+            const lastLoop = !args.state.next || (world_info_max_recursion_steps > 0 && args.state.loopCount >= world_info_max_recursion_steps);
+            if (!lastLoop) return;
+            recovered = [...args.activated.entries.values()];
+            args.activated.entries.clear();
+        };
+        this.recovering = true;
+        context.eventSource.on(context.eventTypes.WORLDINFO_SCAN_DONE, capture);
+        try {
+            const native = await checkWorldInfo(chat, contextSize, false, globalScanData);
+            guard();
+            if (sorted && recovered === null) throw new WorldbookError('原生恢复没有返回完整的世界书扫描结果。');
+            return recovered || [...native.allActivatedEntries];
+        } finally {
+            context.eventSource.removeListener(context.eventTypes.WORLDINFO_SCAN_DONE, capture);
+            this.recovering = false;
+        }
     }
 
     async books(options = {}) {

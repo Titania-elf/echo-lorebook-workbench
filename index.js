@@ -8,11 +8,13 @@ import { NativeWorldbookAdapter } from './native-adapter.js';
 import { EntryStore } from './entry-store.js';
 import { WorkbenchSettings } from './workbench-state.js';
 import { WorldbookWorkbench } from './workbench.js';
-import { element, assetUrl } from './workbench-utils.js';
+import { element } from './workbench-utils.js';
+import { showSchedulerWarning } from './scheduler-notice.js';
 
+const native = new NativeWorldbookAdapter(getContext);
 const director = new LorebookDirector({
-    getContext, getEntries: getSortedEntries, requestModel,
-    onWarning: () => globalThis.toastr?.warning('选书失败，本轮已回退原生触发；详情见回声书台的调度页或扩展设置。', '回声书台'),
+    getContext, getEntries: getSortedEntries, native, requestModel,
+    onWarning: showSchedulerWarning,
 });
 globalThis.lorebookDirectorInterceptor = (...args) => director.intercept(...args);
 
@@ -31,7 +33,7 @@ jQuery(async () => {
     }
     const { eventSource, eventTypes } = context;
     const settings = new WorkbenchSettings(getContext);
-    const api = new NativeWorldbookAdapter(getContext);
+    const api = native;
     const store = new EntryStore({
         api, settings,
         onBegin: () => director.invalidate('正在保存原世界书，旧调度选择已失效。'),
@@ -41,13 +43,13 @@ jQuery(async () => {
     const mountMenu = () => {
         const menu = document.getElementById('extensionsMenu');
         if (!menu || document.getElementById(`${MODULE}-menu`)) return Boolean(menu);
-        const entry = element('button', {
-            id: `${MODULE}-menu`, type: 'button', class: 'list-group-item wb-menu-entry',
+        const entry = element('div', {
+            id: `${MODULE}-menu`, class: 'list-group-item flex-container flexGap5',
+            title: '打开世界书工作台',
             onclick: () => workbench.run(() => workbench.open()),
-        }, element('img', { class: 'wb-brand-mark', src: assetUrl('echo-mark.svg'), alt: '', 'aria-hidden': 'true' }),
-        element('span', { class: 'wb-brand-name', text: '回声书台' }));
+        }, element('div', { class: 'fa-solid fa-book-open extensionsMenuExtensionButton', 'aria-hidden': 'true' }),
+        element('span', { text: '回声书台' }));
         menu.append(entry);
-        workbench.applyTheme();
         return true;
     };
     if (!mountMenu() && eventTypes.APP_READY) {
@@ -56,14 +58,14 @@ jQuery(async () => {
     }
     // Start events also cover dry/quiet requests. Invalidate instead of letting them inherit
     // a foreground allowlist. WI's loaded event unfortunately has no request ID.
-    eventSource.on(eventTypes.GENERATION_STARTED, () => director.invalidate('生成请求开始，等待本轮调度。'));
+    eventSource.on(eventTypes.GENERATION_STARTED, (...args) => director.startGeneration(...args));
     eventSource.on(eventTypes.WORLDINFO_ENTRIES_LOADED, payload => director.onEntriesLoaded(payload));
+    if (eventTypes.WORLDINFO_SCAN_DONE) eventSource.on(eventTypes.WORLDINFO_SCAN_DONE, args => director.onScanDone(args));
     eventSource.on(eventTypes.WORLD_INFO_ACTIVATED, entries => director.onActivated(entries));
-    eventSource.on(eventTypes.GENERATE_AFTER_DATA, () => director.onPromptReady());
-    eventSource.on(eventTypes.GENERATION_STOPPED, () => director.invalidate('生成已停止，辅助请求和待注入选择已清理。'));
-    eventSource.on(eventTypes.GENERATION_ENDED, () => {
-        if (director.gate || director.operation?.kind === 'generation') director.invalidate('生成结束，待处理调度已清理。');
-    });
+    if (eventTypes.CHAT_COMPLETION_PROMPT_READY) eventSource.on(eventTypes.CHAT_COMPLETION_PROMPT_READY, data => director.onChatCompletionReady(data));
+    eventSource.on(eventTypes.GENERATE_AFTER_DATA, (...args) => director.onPromptReady(...args));
+    eventSource.on(eventTypes.GENERATION_STOPPED, () => director.stopGeneration());
+    eventSource.on(eventTypes.GENERATION_ENDED, () => director.endGeneration());
     eventSource.on(eventTypes.CHAT_CHANGED, () => {
         director.invalidate('聊天已切换，下次生成重新建立工作集。', true);
         void director.loadCatalog();
@@ -82,10 +84,13 @@ jQuery(async () => {
         workbench.onBindingsChanged();
     });
     for (const type of [eventTypes.CHARACTER_EDITED, eventTypes.PERSONA_CHANGED, eventTypes.PERSONA_UPDATED, eventTypes.GROUP_UPDATED, eventTypes.APP_READY]) {
-        if (type) eventSource.on(type, () => workbench.onBindingsChanged());
+        if (type) eventSource.on(type, () => {
+            director.invalidate('角色、人设或挂载已改变，下次生成重新选择。');
+            workbench.onBindingsChanged();
+        });
     }
     try {
-        await mountUI(director, { openWorkbench: () => workbench.run(() => workbench.open()) });
+        await mountUI(director);
         workbench.applyTheme();
     } catch (error) {
         console.error('[Echo Lorebook Workbench] 设置面板加载失败', error);

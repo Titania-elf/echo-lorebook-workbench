@@ -37,6 +37,7 @@ const paths = {
     chevron: '<path d="m9 18 6-6-6-6"/>',
     down: '<path d="m6 9 6 6 6-6"/>',
     back: '<path d="m15 18-6-6 6-6"/>',
+    menu: '<path d="M4 6h16M4 12h16M4 18h16"/>',
     plus: '<path d="M12 5v14M5 12h14"/>',
     book: '<path d="M12 7v14M3 3h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5v16h-5a4 4 0 0 0-4 2 4 4 0 0 0-4-2H3z"/>',
     layers: '<path d="m12 3 10 5-10 5L2 8zM2 12l10 5 10-5M2 16l10 5 10-5"/>',
@@ -120,6 +121,8 @@ export class SheetController {
         this.layer.hidden = false;
         for (const child of this.root.children) if (child !== this.layer && !child.classList.contains('wb-toast')) child.inert = true;
         this.panel.scrollTop = 0;
+        this.body.scrollTop = 0;
+        this.root.dispatchEvent(new Event('wb-layout'));
         queueMicrotask(() => { if (!this.layer.hidden) this.panel.querySelector('[data-wb="sheet-close"]')?.focus({ preventScroll: true }); });
     }
 
@@ -129,6 +132,7 @@ export class SheetController {
         for (const child of this.root.children) child.inert = false;
         const dismiss = this.onDismiss;
         this.onDismiss = null;
+        this.root.dispatchEvent(new Event('wb-layout'));
         if (this.focusBefore?.isConnected) this.focusBefore.focus({ preventScroll: true });
         dismiss?.();
     }

@@ -1,30 +1,40 @@
 import {
     MODULE, EXTENSION_NAME, EXTENSION_FOLDER, settingsWithDefaults, makeCatalog, digest, entryId, historyChain, previousSnapshot,
     selectorPayload, SELECTOR_SYSTEM, SUMMARY_SYSTEM, validateSelection, allocateSelection,
-    overlayEntries, recordSnapshot, parseJsonObject,
+    recordSnapshot, parseJsonObject, recentContext,
 } from './core.js';
+import { SchedulerScanGate, verifyNativeSources } from './scheduler-native.js';
 
 const SUPPORTED_TYPES = new Set(['normal', 'regenerate', 'swipe', 'continue']);
 
 export class LorebookDirector {
-    constructor({ getContext, getEntries, requestModel, onChange = () => {}, onWarning = () => {} }) {
+    constructor({ getContext, getEntries, native, requestModel, onChange = () => {}, onWarning = () => {} }) {
         this.getContext = getContext;
         this.getEntries = getEntries;
+        this.native = native;
         this.requestModel = requestModel;
         this.onChange = onChange;
         this.onWarning = onWarning;
         this.catalog = [];
         this.activeBooks = [];
+        this.catalogError = '';
         this.report = null;
-        this.status = '尚未运行。选择托管书后，可先试选而不发送正文。';
+        this.status = '尚未运行。选择托管书和 API 后，可以试选查看蓝灯常驻与绿灯筛选结果。';
         this.operation = null;
         this.gate = null;
         this.revision = 0;
         this.listeners = new Set();
+        this.nativeReads = new Set();
+        this.scanGates = new Set();
+        this.generationEpoch = 0;
+        this.generationSignal = null;
+        this.generationStopped = false;
+        this.workSerial = 0;
+        this.latestWork = 0;
     }
 
     get config() { return settingsWithDefaults(this.getContext().extensionSettings[MODULE]); }
-    get busy() { return Boolean(this.operation || this.gate); }
+    get busy() { return Boolean(this.operation || this.gate || this.native?.recovering); }
 
     chatKey(context = this.getContext()) {
         return JSON.stringify([context.groupId ?? null, context.characterId ?? null, context.chatId ?? null]);
@@ -49,7 +59,8 @@ export class LorebookDirector {
     }
 
     notify() {
-        this.onChange(this);
+        try { this.onChange(this); }
+        catch (error) { console.warn('[回声书台] 调度状态展示失败', error); }
         for (const listener of this.listeners) {
             try { listener(this); }
             catch (error) { console.warn('[回声书台] 工作台状态刷新失败', error); }
@@ -84,14 +95,77 @@ export class LorebookDirector {
         this.notify();
     }
 
-    invalidate(reason = '上下文已改变，下次生成会重新选择。', clear = false) {
+    invalidate(reason = '上下文已改变，下次生成会重新选择。', clear = false, { warning = true, discardCommitted = false } = {}) {
+        const committed = this.gate?.committed && !clear && !discardCommitted ? this.gate : null;
+        const pending = this.operation?.kind === 'generation' ? this.operation : committed ? null : this.gate;
         this.revision++;
         this.operation?.controller.abort(new Error(reason));
         this.operation = null;
-        this.gate = null;
-        if (clear) { this.catalog = []; this.activeBooks = []; this.report = null; }
-        this.status = reason;
+        for (const gate of this.scanGates) {
+            if (gate !== committed) gate.cancel();
+        }
+        this.gate = committed;
+        if (pending && warning) this.fallback(pending, reason);
+        if (clear) { this.catalog = []; this.activeBooks = []; this.catalogError = ''; this.report = null; }
+        if (committed && this.report) this.report.stale = true;
+        this.status = committed ? `${reason}本轮资料已经交给提示词构造，修改从下次生成生效。` : reason;
         this.notify();
+    }
+
+    startGeneration(_type, options = {}, _dryRun = false) {
+        this.invalidate('生成请求开始，等待本轮调度。', false, { discardCommitted: true });
+        this.generationEpoch++;
+        this.generationSignal = options.signal || null;
+        this.generationStopped = false;
+    }
+
+    stopGeneration() {
+        const pending = this.operation?.kind === 'generation' ? this.operation : this.gate;
+        this.generationStopped = true;
+        this.invalidate('生成已停止，辅助请求和待注入选择已清理。', false, { warning: false, discardCommitted: true });
+        if (pending) this.cancelReport(pending, '正文生成已停止，本轮调度已取消。');
+        this.notify();
+    }
+
+    endGeneration() {
+        if (this.gate || this.operation?.kind === 'generation') {
+            const pending = this.operation?.kind === 'generation' ? this.operation : this.gate;
+            this.invalidate('生成结束，待处理调度已清理。', false, { warning: false, discardCommitted: true });
+            this.cancelReport(pending, '正文生成已结束，本轮调度没有完成提示词构造。');
+            this.notify();
+        }
+        this.generationSignal = null;
+        for (const gate of this.scanGates) {
+            // A staged source may already have been cloned by an unfinished native scan.
+            if (!gate.staged || (gate.cancelled && gate.committed && gate.scanEntries)) {
+                gate.finish();
+                this.scanGates.delete(gate);
+            }
+        }
+    }
+
+    fallback(turn, reason) {
+        if (turn.epoch !== this.generationEpoch || turn.chatKey !== this.chatKey() || turn.id !== this.latestWork) return;
+        const info = turn.result || turn.info || {};
+        this.report = {
+            ...info, mode: 'fallback', blue: [], selected: [], skipped: [], actual: [],
+            construction: 'native', error: reason, at: Date.now(), chatKey: turn.chatKey,
+        };
+        this.status = `本轮已跳过调度，继续原生生成：${reason}`;
+        if (!turn.warned) {
+            turn.warned = true;
+            try { this.onWarning(this.status); }
+            catch (error) { console.warn('[回声书台] 顶部通知显示失败', error); }
+        }
+    }
+
+    cancelReport(turn, reason) {
+        if (turn.id !== this.latestWork || turn.epoch !== this.generationEpoch || turn.chatKey !== this.chatKey()) return;
+        this.report = {
+            ...(turn.result || turn.info || {}), mode: 'cancelled', blue: [], selected: [], skipped: [], actual: [],
+            construction: 'cancelled', error: reason, at: Date.now(), chatKey: turn.chatKey,
+        };
+        this.status = reason;
     }
 
     updateSettings(patch) {
@@ -106,7 +180,7 @@ export class LorebookDirector {
         const context = this.getContext();
         if (!context.chatId) return;
         const state = this.state(context);
-        const candidate = this.catalog.some(x => x.id === id);
+        const candidate = this.catalog.some(x => x.id === id && x.kind === 'green');
         // A disabled/unmounted entry may still have an old rule that must be releasable.
         if (!candidate && !(mode === 'auto' && Object.hasOwn(state.overrides, id))) return;
         this.invalidate('手动规则已更新，下次试选或生成时生效。');
@@ -131,17 +205,63 @@ export class LorebookDirector {
         if (!context.chatId) throw new Error('请先打开一个角色聊天。');
         const op = {
             kind, revision: this.revision, signature: this.signature(context), chatKey: this.chatKey(context),
-            controller: new AbortController(), config: this.config,
+            controller: new AbortController(), config: this.config, epoch: this.generationEpoch,
+            id: ++this.workSerial,
+            info: {
+                historyCount: 0, blueAvailable: 0, greenAvailable: 0, greenCandidates: 0,
+                apiAttempted: false, apiSubmitted: false, apiDispatched: false, apiSucceeded: false, apiSkipReason: '',
+                catalogLoaded: false,
+            },
         };
+        this.latestWork = op.id;
+        if (kind !== 'summary') op.timer = setTimeout(() => op.controller.abort(new Error('调度等待超时，已跳过本轮调度。')), op.config.timeoutSeconds * 1000);
+        if (kind === 'generation' && this.generationSignal) {
+            const signal = this.generationSignal;
+            const cancel = () => op.controller.abort(signal.reason || new Error('正文生成已取消。'));
+            signal.addEventListener('abort', cancel, { once: true });
+            if (signal.aborted) cancel();
+            op.detach = () => signal.removeEventListener('abort', cancel);
+        }
         this.operation = op;
         this.notify();
         return op;
     }
 
     assertCurrent(op) {
-        if (this.operation !== op || op.controller.signal.aborted || op.revision !== this.revision || op.signature !== this.signature()) {
+        if (op.controller.signal.aborted) throw op.controller.signal.reason || new Error('请求已取消。');
+        if (this.operation !== op || op.revision !== this.revision || op.signature !== this.signature()
+            || op.epoch !== this.generationEpoch) {
             throw new Error('对话或设置已改变，已丢弃旧请求的结果。');
         }
+    }
+
+    finishOperation(op) {
+        if (!op) return;
+        clearTimeout(op.timer);
+        op.detach?.();
+        if (this.operation === op) this.operation = null;
+    }
+
+    waitFor(promise, op) {
+        const signal = op.controller.signal;
+        return new Promise((resolve, reject) => {
+            const cancel = () => reject(signal.reason || new Error('请求已取消。'));
+            signal.addEventListener('abort', cancel, { once: true });
+            if (signal.aborted) cancel();
+            Promise.resolve(promise).then(resolve, reject).finally(() => signal.removeEventListener('abort', cancel));
+        });
+    }
+
+    async readNative(op = null) {
+        const read = { payloads: [] };
+        this.nativeReads.add(read);
+        const promise = Promise.resolve().then(() => this.getEntries()).finally(() => this.nativeReads.delete(read));
+        const entries = await (op ? this.waitFor(promise, op) : promise);
+        if (read.payloads.length !== 1) throw new Error('世界书读取未完成，或等待期间出现了另一轮读取。');
+        const rawCount = ['globalLore', 'characterLore', 'chatLore', 'personaLore']
+            .reduce((sum, key) => sum + (read.payloads[0][key]?.length || 0), 0);
+        if (!Array.isArray(entries) || entries.length !== rawCount) throw new Error('酒馆未能完整解析世界书，已跳过本轮调度。');
+        return { entries, payload: read.payloads[0] };
     }
 
     async loadCatalog() {
@@ -149,46 +269,136 @@ export class LorebookDirector {
         const revision = this.revision;
         const signature = this.signature();
         try {
-            const entries = await this.getEntries();
+            const { entries, payload } = await this.readNative();
             if (this.busy || revision !== this.revision || signature !== this.signature()) return;
-            this.activeBooks = [...new Set(entries.map(x => x.world))];
-            this.catalog = makeCatalog(entries, this.config.books, this.config.summaries);
+            this.activeBooks = [...this.native.associations().keys()];
+            this.catalogError = '';
+            this.catalog = makeCatalog(entries, this.config.books, this.config.summaries, {
+                applicable: entry => this.native.schedulerApplicable(entry),
+                sources: this.sourceMap(payload),
+            });
             this.notify();
         } catch (error) {
-            if (revision === this.revision) { this.status = `读取目录失败：${error.message}`; this.notify(); }
+            if (revision === this.revision) {
+                this.catalogError = error.message;
+                this.status = `读取目录失败：${error.message}`;
+                this.notify();
+            }
         }
     }
 
-    async select(chat, op) {
-        const entries = await this.getEntries();
+    sourceMap(payload) {
+        return new Map(['globalLore', 'characterLore', 'chatLore', 'personaLore']
+            .flatMap(key => payload[key]).map(entry => [entryId(entry), entry]));
+    }
+
+    async select(chat, op, type = 'normal') {
+        op.info.historyCount = recentContext(chat, op.config.recentMessages).length;
+        op.info.historyRequested = op.config.recentMessages;
+        this.status = `正在读取最近 ${op.info.historyCount} 层完整聊天和已保存的世界书…`;
+        this.notify();
+        const snapshot = await this.waitFor(this.native.schedulerSnapshot(op.config.books, { signal: op.controller.signal }), op);
         this.assertCurrent(op);
-        this.activeBooks = [...new Set(entries.map(x => x.world))];
-        this.catalog = makeCatalog(entries, op.config.books, op.config.summaries);
+        const { entries, payload } = await this.readNative(op);
+        this.assertCurrent(op);
+        verifyNativeSources(payload, snapshot);
+        this.activeBooks = [...this.native.associations().keys()];
+        this.catalog = makeCatalog(entries, snapshot.books, op.config.summaries, {
+            applicable: entry => this.native.schedulerApplicable(entry, type), sources: snapshot.sources,
+        });
         const catalog = this.catalog;
+        this.catalogError = '';
+        const blue = catalog.filter(item => item.kind === 'blue');
+        const green = catalog.filter(item => item.kind === 'green');
         const state = this.state();
         const overrides = { ...state.overrides };
         const previous = previousSnapshot(state.snapshots, historyChain(chat));
         let choice = { scene: previous?.scene || '', selected: [] };
-        const modelCatalog = catalog.filter(x => overrides[x.id] !== 'exclude');
-        if (modelCatalog.some(x => overrides[x.id] !== 'pin')) {
-            const payload = selectorPayload(modelCatalog, chat, previous, overrides, op.config);
-            this.status = `资料管理员正在阅读 ${modelCatalog.length} 张目录卡片…`;
-            this.notify();
-            const response = await this.requestModel(this.getContext(), op.config, [
-                { role: 'system', content: SELECTOR_SYSTEM },
-                { role: 'user', content: JSON.stringify(payload) },
-            ], op.controller.signal);
-            this.assertCurrent(op);
-            choice = validateSelection(response, modelCatalog);
-        }
+        const modelCatalog = green.filter(item => overrides[item.id] !== 'exclude' && overrides[item.id] !== 'pin');
+        Object.assign(op.info, { catalogLoaded: true, blueAvailable: blue.length, greenAvailable: green.length, greenCandidates: modelCatalog.length, mountedBooks: snapshot.books });
         const context = this.getContext();
-        const result = await allocateSelection(choice, catalog, overrides, op.config,
-            text => context.getTokenCountAsync(context.substituteParams(String(text))));
+        const tokenCache = new Map();
+        const countTokens = text => {
+            const content = String(text);
+            if (!tokenCache.has(content)) tokenCache.set(content, this.waitFor(context.getTokenCountAsync(content), op));
+            return tokenCache.get(content);
+        };
+        const pins = await allocateSelection(choice, catalog, overrides, op.config, countTokens);
         this.assertCurrent(op);
-        return result;
+        if (op.kind === 'generation') {
+            this.native.assertSchedulerSlots([...blue, ...pins.selected], type);
+        }
+        if (modelCatalog.length && pins.selected.length < op.config.maxEntries && pins.tokens < op.config.tokenBudget) {
+            const input = selectorPayload(catalog, chat, previous, overrides, op.config, pins.selected);
+            input.remainingGreenTokenBudget = op.config.tokenBudget - pins.tokens;
+            op.info.apiAttempted = true;
+            this.status = `筛选 API 正在阅读 ${blue.length} 条蓝灯、${pins.selected.length} 条固定绿灯和 ${modelCatalog.length} 条候选绿灯的全文…`;
+            this.notify();
+            const response = await this.waitFor(this.requestModel(context, op.config, [
+                { role: 'system', content: SELECTOR_SYSTEM },
+                { role: 'user', content: JSON.stringify(input) },
+            ], op.controller.signal, 1800, { onDispatch: info => {
+                this.assertCurrent(op);
+                op.info.apiSubmitted = true;
+                op.info.apiDispatched = !info.submittedOnly;
+                op.info.apiModel = info.model || '';
+            } }), op);
+            this.assertCurrent(op);
+            op.info.apiDispatched = true;
+            op.info.apiSucceeded = true;
+            choice = validateSelection(response, modelCatalog);
+        } else {
+            op.info.apiSkipReason = !modelCatalog.length ? '没有可供模型筛选的绿灯'
+                : pins.selected.length >= op.config.maxEntries ? '固定绿灯已用满条目上限' : '固定绿灯已用满 Token 预算';
+        }
+        const selected = await allocateSelection(choice, catalog, overrides, op.config, countTokens);
+        this.assertCurrent(op);
+        const constants = [];
+        for (const item of blue) {
+            const rawCount = await countTokens(item.entry.content);
+            if (!Number.isFinite(rawCount) || rawCount < 0) throw new Error('无法估算蓝灯条目的 Token 数量。');
+            constants.push({ id: item.id, kind: 'blue', scope: 'constant', position: item.position, reason: '蓝灯常驻，默认加入本轮', tokens: Math.ceil(rawCount) + 4 });
+        }
+        this.assertCurrent(op);
+        if (JSON.stringify(this.native.schedulerBooks(op.config.books)) !== JSON.stringify(snapshot.books)) {
+            throw new Error('当前聊天的世界书挂载已改变。');
+        }
+        if (op.kind === 'generation') {
+            this.status = '正在确认本轮原书版本与前后注入位置…';
+            this.notify();
+            const latest = await this.waitFor(this.native.schedulerSnapshot(op.config.books, { signal: op.controller.signal }), op);
+            this.assertCurrent(op);
+            if (latest.versions.size !== snapshot.versions.size
+                || [...snapshot.versions].some(([id, version]) => latest.versions.get(id) !== version)) {
+                throw new Error('等待筛选期间原世界书已经改变，已跳过本轮调度。');
+            }
+        }
+        const included = [...constants, ...selected.selected];
+        const result = {
+            ...selected, ...op.info, blue: constants,
+            blueTokens: constants.reduce((sum, item) => sum + item.tokens, 0),
+            beforeCount: included.filter(item => item.position === 'before').length,
+            afterCount: included.filter(item => item.position === 'after').length,
+        };
+        const byId = new Map(catalog.map(item => [item.id, item]));
+        for (const item of included) item.mappedPosition = ![0, 1].includes(byId.get(item.id).entry.position);
+        if (op.kind === 'generation') this.native.assertSchedulerSlots(included, type);
+        const prepared = op.kind === 'generation' ? included.map(item => {
+            const source = structuredClone(byId.get(item.id).entry);
+            return {
+                ...source, content: String(context.substituteParams(String(source.content))),
+                disable: false, constant: true, ignoreBudget: true, useProbability: false,
+                position: item.position === 'before' ? this.native.positions.before : this.native.positions.after,
+                group: '', groupOverride: false, sticky: null, cooldown: null, delay: null,
+                preventRecursion: true, excludeRecursion: false, delayUntilRecursion: false,
+            };
+        }) : [];
+        this.assertCurrent(op);
+        op.info = result;
+        return { result, snapshot, catalog, prepared };
     }
 
-    async intercept(chat, _contextSize, _abort, type) {
+    async intercept(chat, contextSize, _abort, type) {
         const config = this.config;
         const context = this.getContext();
         const identities = new Set([MODULE, EXTENSION_NAME, EXTENSION_FOLDER,
@@ -198,53 +408,187 @@ export class LorebookDirector {
         let op;
         try {
             op = this.begin('generation');
+            op.type = type || 'normal';
+            if (!context.eventTypes.WORLDINFO_SCAN_DONE) throw new Error('当前酒馆没有生成前世界书扫描接口。');
             const input = structuredClone(chat);
-            const result = await this.select(input, op);
+            const { result, snapshot, catalog, prepared } = await this.select(input, op, op.type);
             this.assertCurrent(op);
-            this.report = { ...result, mode: 'generation', actual: [], at: Date.now(), chatKey: op.chatKey };
-            this.gate = {
-                revision: this.revision, signature: op.signature, books: [...config.books],
-                selected: new Set(result.selected.map(x => x.id)), result, input,
-            };
-            this.status = `已选 ${result.selected.length} 条，等待原生世界书扫描。`;
-        } catch (error) {
-            // Fail open deliberately: without a gate, native blue/green/vector behavior is untouched.
-            if (!op || this.operation === op) {
-                this.gate = null;
-                this.report = { mode: 'fallback', selected: [], skipped: [], actual: [], error: error.message, chatKey: op?.chatKey || this.chatKey(context) };
-                this.status = `选书失败，本轮回退原生触发：${error.message}`;
-                this.onWarning(this.status);
+            this.report = { ...result, mode: 'generation', actual: [], construction: 'waiting', at: Date.now(), chatKey: op.chatKey };
+            if (catalog.length) {
+                this.gate = new SchedulerScanGate({
+                    snapshot, catalog, prepared, result, input, contextSize, type: op.type,
+                    revision: this.revision, signature: op.signature, epoch: op.epoch, chatKey: op.chatKey, id: op.id,
+                });
+                this.scanGates.add(this.gate);
+                this.status = `蓝灯 ${result.blue.length} 条默认加入，绿灯 ${result.selected.length} 条入选，等待前后位置的世界书构造。`;
+            } else {
+                this.report.construction = 'empty';
+                this.status = `本轮没有可接管的蓝灯或绿灯；未调用筛选 API（${result.apiSkipReason}），正文继续原生生成。`;
             }
+        } catch (error) {
+            if (this.gate && this.gate.id === op?.id) {
+                this.gate.cancel();
+                this.gate = null;
+            }
+            if (op && (this.generationStopped || this.generationSignal?.aborted)) {
+                this.cancelReport(op, '正文生成已取消，本轮调度已清理。');
+            } else if (op) this.fallback(op, error.message);
         } finally {
-            if (this.operation === op) this.operation = null;
+            this.finishOperation(op);
             this.notify();
         }
     }
 
     gateIsCurrent() {
-        return this.gate && this.gate.revision === this.revision && this.gate.signature === this.signature() && this.config.enabled;
+        const gate = this.gate;
+        return gate && !gate.cancelled && gate.epoch === this.generationEpoch && gate.chatKey === this.chatKey()
+            && !this.generationStopped && !this.generationSignal?.aborted
+            && (gate.committed || (gate.revision === this.revision && gate.signature === this.signature() && this.config.enabled));
     }
 
     onEntriesLoaded(payload) {
-        if (this.gateIsCurrent()) overlayEntries(payload, this.gate.books, this.gate.selected);
+        if (this.native.recovering) return;
+        if (this.nativeReads.size) {
+            for (const read of this.nativeReads) read.payloads.push(structuredClone(payload));
+            if (this.gate && !this.gate.committed) this.invalidate('世界书等待期间出现了另一轮目录读取，已跳过本轮调度。');
+            return;
+        }
+        if (!this.gate) return;
+        if (this.gate.committed) return;
+        if (!this.gateIsCurrent()) {
+            const gate = this.gate;
+            const cancelled = this.generationStopped || this.generationSignal?.aborted;
+            this.invalidate('当前聊天或调度设置已改变，已跳过本轮调度。', false, { warning: !cancelled });
+            if (cancelled) {
+                this.cancelReport(gate, '正文生成已取消，本轮调度已清理。');
+                this.notify();
+            }
+            return;
+        }
+        try {
+            verifyNativeSources(payload, this.gate.snapshot);
+            this.gate.stage(payload);
+            this.status = '本轮蓝灯与入选绿灯已准备好，正在构造世界书之前／之后。';
+        } catch (error) {
+            const gate = this.gate;
+            gate.cancel();
+            this.gate = null;
+            this.fallback(gate, error.message);
+        }
+        this.notify();
+    }
+
+    async onScanDone(args) {
+        if (this.native.recovering || !Array.isArray(args?.sortedEntries)) return;
+        for (const gate of this.scanGates) {
+            if (gate.completed || !gate.matches(args.sortedEntries)) continue;
+            gate.scanEntries ||= args.sortedEntries;
+            gate.activeMap ||= args.activated?.entries;
+            if (!gate.cancelled && (this.gate !== gate || !this.gateIsCurrent())) {
+                gate.cancel();
+                if (this.gate === gate) this.gate = null;
+                if (this.generationStopped || this.generationSignal?.aborted) this.cancelReport(gate, '正文生成已取消，本轮调度已清理。');
+                else this.fallback(gate, '聊天或设置已变化，本轮选择已丢弃。');
+            }
+            try {
+                if (!gate.cancelled) {
+                    gate.inject(args);
+                    if (this.report?.mode === 'generation') {
+                        this.report.construction = 'scan-accepted';
+                        this.report.actual = gate.acceptedIds([...args.activated.entries.values()]);
+                    }
+                    // No owned content means WORLD_INFO_ACTIVATED may never fire.
+                    // Keep the empty allowlist fixed while native books finish scanning.
+                    if (!gate.prepared.length) gate.committed = true;
+                }
+            } catch (error) {
+                gate.cancel();
+                if (this.gate === gate) this.gate = null;
+                this.fallback(gate, error.message);
+            }
+            if (gate.cancelled && !gate.recovered) {
+                gate.restoreScan(args.sortedEntries);
+                gate.removeInserted(args.activated?.entries);
+                try {
+                    const guard = () => {
+                        if (gate.epoch !== this.generationEpoch || gate.signature !== this.signature()
+                            || this.generationStopped || this.generationSignal?.aborted) {
+                            throw new Error('原来的生成上下文已经结束。');
+                        }
+                    };
+                    guard();
+                    const entries = await this.native.recoverSchedulerScan(gate.input, gate.contextSize, gate.type, args.sortedEntries, guard);
+                    args.activated.entries.clear();
+                    for (const entry of entries) args.activated.entries.set(`${entry.world}.${entry.uid}`, entry);
+                    args.activated.text = '';
+                    args.state.next = 0;
+                    gate.recovered = true;
+                } catch (error) {
+                    // A cancelled/changed chat must never acquire the new chat's lore.
+                    if (gate.epoch === this.generationEpoch && gate.signature === this.signature()
+                        && !this.generationStopped && !this.generationSignal?.aborted) {
+                        this.fallback(gate, `恢复原生世界书时遇到问题：${error.message}`);
+                    }
+                } finally {
+                    gate.finish();
+                    this.scanGates.delete(gate);
+                }
+            }
+            this.notify();
+        }
     }
 
     onActivated(entries) {
         if (!this.gateIsCurrent() || this.report?.mode !== 'generation') return;
-        this.report.actual = entries.map(entryId).filter(id => this.gate.selected.has(id));
+        if (!this.gate.injected || !this.gate.activeMap) return;
+        const scanned = new Set(this.gate.activeMap.values());
+        if (entries.some(entry => !scanned.has(entry))) return;
+        const accepted = this.gate.acceptedIds(entries);
+        if (!accepted.length && this.gate.prepared.length) return;
+        this.report.actual = accepted;
+        this.report.construction = 'scan-accepted';
+        this.gate.committed = true;
+        this.gate.restoreScan();
+        this.status = '本轮资料已经交给酒馆构造提示词，辅助筛选已结束。';
         this.notify();
     }
 
-    onPromptReady() {
-        if (!this.gateIsCurrent()) { this.gate = null; return; }
-        const { input, result } = this.gate;
+    onChatCompletionReady(data) {
+        if (data?.dryRun || !this.gateIsCurrent()) return;
+        this.report.promptPrepared = true;
+        this.notify();
+    }
+
+    onPromptReady(_data, dryRun = false) {
+        if (dryRun) return;
+        if (!this.gateIsCurrent()) return;
+        const gate = this.gate;
+        const { input, result } = gate;
+        if (!gate.injected) {
+            gate.cancel();
+            this.gate = null;
+            this.fallback(gate, '酒馆没有接纳本轮世界书扫描，本轮选择未注入。');
+            this.notify();
+            return;
+        }
         const actual = new Set(this.report?.actual || []);
         const context = this.getContext();
-        this.state(context).snapshots = recordSnapshot(this.state(context).snapshots, input, {
-            ...result, selected: result.selected.filter(x => actual.has(x.id)),
-        });
-        context.saveMetadataDebounced();
-        this.status = `调度完成：选中 ${result.selected.length} 条，原生激活 ${actual.size} 条。`;
+        try {
+            if (gate.revision === this.revision && gate.signature === this.signature()) {
+                this.state(context).snapshots = recordSnapshot(this.state(context).snapshots, input, {
+                    ...result, selected: result.selected.filter(x => actual.has(x.id)),
+                });
+                context.saveMetadataDebounced();
+            }
+        } catch (error) {
+            this.report.memoryError = `场景参考未保存：${error.message}`;
+            console.warn('[回声书台] 场景参考保存失败，正文照常继续', error);
+        }
+        this.report.promptPrepared = true;
+        this.report.construction = 'prepared';
+        this.status = `调度完成：蓝灯 ${result.blue.length} 条、绿灯 ${result.selected.length} 条，世界书构造接纳 ${actual.size} 条；原来的正文请求继续。${this.report.memoryError || ''}`;
+        gate.finish();
+        this.scanGates.delete(gate);
         this.gate = null;
         this.notify();
     }
@@ -254,14 +598,17 @@ export class LorebookDirector {
         try {
             op = this.begin('preview');
             const chat = structuredClone(this.getContext().chat || []);
-            const result = await this.select(chat, op);
+            const { result } = await this.select(chat, op);
             this.assertCurrent(op);
-            this.report = { ...result, mode: 'preview', actual: null, at: Date.now(), chatKey: op.chatKey };
-            this.status = `试选完成：${result.selected.length} 条；没有注入正文，也没有更新场景记忆。`;
+            this.report = { ...result, mode: 'preview', actual: null, construction: 'preview', at: Date.now(), chatKey: op.chatKey };
+            this.status = `试选完成：蓝灯 ${result.blue.length} 条常驻、绿灯 ${result.selected.length} 条入选。${result.apiDispatched ? '筛选 API 已调用。' : `未调用筛选 API：${result.apiSkipReason}。`}没有注入正文或更新场景记忆。`;
         } catch (error) {
-            if (!op || this.operation === op) this.status = `试选失败：${error.message}`;
+            if (!op || this.operation === op) {
+                this.report = { ...op?.info, mode: 'preview-error', blue: [], selected: [], skipped: [], actual: null, error: error.message, chatKey: op?.chatKey || this.chatKey() };
+                this.status = `试选失败：${error.message}`;
+            }
         } finally {
-            if (this.operation === op) this.operation = null;
+            this.finishOperation(op);
             this.notify();
         }
     }
@@ -270,19 +617,22 @@ export class LorebookDirector {
         let op;
         try {
             op = this.begin('summary');
-            const entries = await this.getEntries();
+            const { entries, payload } = await this.readNative(op);
             this.assertCurrent(op);
-            const catalog = makeCatalog(entries, op.config.books, op.config.summaries);
+            const sources = this.sourceMap(payload);
+            const catalog = makeCatalog(entries, op.config.books, op.config.summaries, {
+                applicable: entry => this.native.schedulerApplicable(entry), sources,
+            });
             const missing = catalog.filter(x => x.summaryKind !== 'AI 概括');
-            const eligible = missing.filter(x => x.entry.content.length <= 10000);
+            const eligible = missing.filter(x => x.content.length <= 10000);
             const batches = [];
             let batch = [];
             let size = 0;
             for (const item of eligible) {
-                if (batch.length && (size + item.entry.content.length > 12000 || batch.length >= 6)) {
+                if (batch.length && (size + item.content.length > 12000 || batch.length >= 6)) {
                     batches.push(batch); batch = []; size = 0;
                 }
-                batch.push(item); size += item.entry.content.length;
+                batch.push(item); size += item.content.length;
             }
             if (batch.length) batches.push(batch);
             let completed = 0;
@@ -291,7 +641,7 @@ export class LorebookDirector {
                 this.notify();
                 const text = await this.requestModel(this.getContext(), op.config, [
                     { role: 'system', content: SUMMARY_SYSTEM },
-                    { role: 'user', content: JSON.stringify(items.map(x => ({ id: x.id, title: x.title, content: x.entry.content }))) },
+                    { role: 'user', content: JSON.stringify(items.map(x => ({ id: x.id, title: x.title, content: x.content }))) },
                 ], op.controller.signal, 2200);
                 this.assertCurrent(op);
                 const parsed = parseJsonObject(text);
@@ -312,13 +662,15 @@ export class LorebookDirector {
                 context.saveSettingsDebounced();
                 completed += validated.size;
             }
-            this.catalog = makeCatalog(entries, op.config.books, this.config.summaries);
-            this.activeBooks = [...new Set(entries.map(x => x.world))];
+            this.catalog = makeCatalog(entries, op.config.books, this.config.summaries, {
+                applicable: entry => this.native.schedulerApplicable(entry), sources,
+            });
+            this.activeBooks = [...this.native.associations().keys()];
             this.status = `目录更新完成：新增 ${completed} 条 AI 概括。${missing.length - eligible.length} 条超过 10000 字符，保留原文摘录（建议拆分）。`;
         } catch (error) {
             if (!op || this.operation === op) this.status = `AI 目录未完成：${error.message} 已完成的批次保留。`;
         } finally {
-            if (this.operation === op) this.operation = null;
+            this.finishOperation(op);
             this.notify();
         }
     }
