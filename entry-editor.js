@@ -90,7 +90,7 @@ export class EntryEditor {
 
     switchField(field, label, { invert = false, hint = '', onChange } = {}) {
         const input = element('input', {
-            id: `wb-edit-${field}`, type: 'checkbox',
+            id: `wb-edit-${field}`, type: 'checkbox', role: 'switch',
             checked: invert ? !this.store.value(field) : Boolean(this.store.value(field)),
             'aria-label': label,
         });

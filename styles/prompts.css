@@ -1,0 +1,546 @@
+/* Prompt drafts use the same local palette and controls as the workbench. */
+#lorebook-director-workbench .wb-prompt-settings {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    width: 100%;
+    min-width: 0;
+    min-height: 0;
+    margin: 0;
+    padding: 18px max(var(--wb-gutter), var(--wb-safe-right)) 24px max(var(--wb-gutter), var(--wb-safe-left));
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+}
+
+#lorebook-director-workbench .wb-prompt-heading,
+#lorebook-director-workbench .wb-prompt-panel-heading,
+#lorebook-director-workbench .wb-prompt-body-heading {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+}
+
+#lorebook-director-workbench .wb-prompt-overview {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-width: 0;
+}
+
+#lorebook-director-workbench .wb-prompt-reorder-status {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+}
+
+#lorebook-director-workbench .wb-prompt-heading {
+    align-items: flex-end;
+    flex-wrap: wrap;
+}
+
+#lorebook-director-workbench .wb-prompt-heading > .wb-field {
+    flex: 1 1 160px;
+    max-width: none;
+}
+
+#lorebook-director-workbench .wb-prompt-grid {
+    display: grid;
+    grid-template-columns: minmax(280px, 1fr) minmax(0, 1.8fr);
+    align-items: start;
+    gap: 20px;
+    min-width: 0;
+}
+
+#lorebook-director-workbench .wb-prompt-list-panel,
+#lorebook-director-workbench .wb-prompt-editor-panel,
+#lorebook-director-workbench .wb-prompt-editor-fields {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-width: 0;
+    min-height: 0;
+}
+
+#lorebook-director-workbench .wb-prompt-list-panel {
+    padding-inline-end: 18px;
+    border-inline-end: 1px solid var(--wb-border);
+}
+
+#lorebook-director-workbench .wb-prompt-panel-heading {
+    justify-content: space-between;
+    flex-wrap: wrap;
+}
+
+#lorebook-director-workbench .wb-prompt-panel-heading h3 {
+    font-size: 1em;
+    line-height: 1.5;
+}
+
+#lorebook-director-workbench .wb-prompt-list-scroll {
+    max-height: min(58vh, 520px);
+    max-height: min(58dvh, 520px);
+}
+
+#lorebook-director-workbench .wb-prompt-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 0;
+    min-height: 0;
+    padding: 5px;
+    scroll-padding-block: 8px;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+}
+
+#lorebook-director-workbench .wb-prompt-entry-row {
+    position: relative;
+    display: flex;
+    flex: 0 0 auto;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0;
+    min-width: 0;
+    padding: 2px;
+    border: 1px solid transparent;
+    border-radius: var(--wb-radius-small);
+    background: var(--wb-soft);
+    transition: background var(--wb-transition), border-color var(--wb-transition);
+}
+
+#lorebook-director-workbench .wb-prompt-entry-header {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    width: 100%;
+    min-width: 0;
+}
+
+#lorebook-director-workbench .wb-prompt-entry-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    padding: 8px 10px;
+    border-block-start: 1px solid var(--wb-border);
+}
+
+#lorebook-director-workbench .wb-prompt-entry-row[data-selected="true"] {
+    border-color: var(--wb-selection-border);
+    background: var(--wb-selection-gradient);
+}
+
+#lorebook-director-workbench .wb-prompt-select {
+    display: flex;
+    flex: 1 1 0;
+    align-items: flex-start;
+    gap: 8px;
+    min-width: 0;
+    min-height: 52px;
+    padding: 10px 4px;
+    border-radius: var(--wb-radius-small);
+    color: var(--wb-text);
+    text-align: start;
+}
+
+#lorebook-director-workbench .wb-prompt-entry-order {
+    flex: 0 0 auto;
+    min-width: 1.1em;
+    color: var(--wb-muted);
+    font-size: 0.78em;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.8;
+}
+
+#lorebook-director-workbench .wb-prompt-entry-main {
+    display: flex;
+    flex: 1 1 0;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+}
+
+#lorebook-director-workbench .wb-prompt-entry-name {
+    font-size: 0.86em;
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+}
+
+#lorebook-director-workbench .wb-prompt-entry-detail {
+    color: var(--wb-muted);
+    font-size: 0.7em;
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+}
+
+#lorebook-director-workbench .wb-prompt-entry-row[data-enabled="false"] .wb-prompt-entry-name {
+    color: var(--wb-muted);
+}
+
+#lorebook-director-workbench .wb-prompt-toggle {
+    flex: 0 0 36px;
+    justify-content: center;
+    min-width: 36px;
+    min-height: 36px;
+    margin: 0;
+    border-radius: var(--wb-radius-small);
+}
+
+#lorebook-director-workbench .wb-prompt-drag-handle,
+#lorebook-director-workbench .wb-prompt-menu {
+    flex: 0 0 36px;
+}
+
+#lorebook-director-workbench .wb-prompt-menu[aria-expanded="true"] {
+    background: var(--wb-soft-strong);
+    color: var(--wb-text);
+}
+
+#lorebook-director-workbench .wb-prompt-drag-handle {
+    touch-action: none;
+    cursor: grab;
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+#lorebook-director-workbench .wb-prompt-drag-handle:not(:disabled):active,
+#lorebook-director-workbench .wb-prompt-entry-row[data-prompt-dragging="true"] .wb-prompt-drag-handle {
+    cursor: grabbing;
+}
+
+#lorebook-director-workbench .wb-prompt-drag-handle:disabled {
+    cursor: not-allowed;
+}
+
+#lorebook-director-workbench .wb-prompt-entry-row[data-prompt-dragging="true"] {
+    border-color: var(--wb-selection-border);
+    background: var(--wb-selection-gradient);
+    opacity: 0.45;
+}
+
+#lorebook-director-workbench .wb-prompt-entry-row[data-prompt-drop]::after {
+    content: "";
+    position: absolute;
+    inset-inline: 0;
+    height: 2px;
+    border-radius: 1px;
+    background: var(--wb-accent);
+    pointer-events: none;
+}
+
+#lorebook-director-workbench .wb-prompt-entry-row[data-prompt-drop="before"]::after {
+    top: -4px;
+}
+
+#lorebook-director-workbench .wb-prompt-entry-row[data-prompt-drop="after"]::after {
+    bottom: -4px;
+}
+
+#lorebook-director-workbench .wb-prompt-meta {
+    display: grid;
+    grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
+    gap: 12px;
+    min-width: 0;
+}
+
+#lorebook-director-workbench .wb-prompt-meta > .wb-field {
+    max-width: none;
+}
+
+#lorebook-director-workbench .wb-prompt-body {
+    max-width: none;
+    min-width: 0;
+}
+
+#lorebook-director-workbench .wb-prompt-body-heading {
+    justify-content: space-between;
+}
+
+#lorebook-director-workbench .wb-prompt-body-heading > label {
+    flex: 1 1 auto;
+    min-width: 0;
+    font-size: 14px;
+    font-weight: 600;
+    overflow-wrap: anywhere;
+}
+
+#lorebook-director-workbench .wb-prompt-text-scroll {
+    flex: 0 0 auto;
+    min-height: 0;
+    padding: 2px;
+}
+
+#lorebook-director-workbench .wb-prompt-body .wb-prompt-text {
+    field-sizing: fixed;
+    height: 360px;
+    min-height: 240px;
+    max-height: min(65vh, 680px);
+    max-height: min(65dvh, 680px);
+    resize: vertical;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    line-height: 1.7;
+}
+
+#lorebook-director-workbench .wb-prompt-macro-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 0;
+}
+
+#lorebook-director-workbench .wb-prompt-macro-list {
+    max-height: min(60vh, 560px);
+    max-height: min(60dvh, 560px);
+    padding: 4px;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scroll-padding-block: 8px;
+}
+
+#lorebook-director-workbench .wb-prompt-macro-option {
+    display: flex;
+    flex: 0 0 auto;
+    flex-direction: column;
+    gap: 6px;
+    width: 100%;
+    min-width: 0;
+    min-height: 64px;
+    padding: 12px;
+    border: 1px solid transparent;
+    border-block-end-color: var(--wb-border);
+    border-radius: var(--wb-radius-small);
+    background: transparent;
+    color: var(--wb-text);
+    font-family: inherit;
+    line-height: 1.6;
+    text-align: start;
+    transition: background var(--wb-transition), border-color var(--wb-transition);
+}
+
+#lorebook-director-workbench .wb-prompt-macro-option strong {
+    font-size: 0.9em;
+    font-weight: 600;
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+}
+
+#lorebook-director-workbench .wb-prompt-macro-option code {
+    color: var(--wb-accent);
+    font-size: 0.82em;
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
+
+#lorebook-director-workbench .wb-prompt-macro-option .wb-help {
+    max-width: none;
+    margin: 0;
+    color: var(--wb-muted);
+    font-size: 0.82em;
+    line-height: 1.6;
+    overflow-wrap: anywhere;
+}
+
+#lorebook-director-workbench .wb-prompt-macro-option:focus-visible {
+    outline-offset: -2px;
+    background: var(--wb-soft);
+}
+
+#lorebook-director-workbench .wb-prompt-list-empty {
+    margin: 0;
+    overflow-wrap: anywhere;
+}
+
+#lorebook-director-workbench .wb-prompt-editor-empty {
+    min-height: 180px;
+}
+
+#lorebook-director-workbench .wb-prompt-problem {
+    margin: 0;
+}
+
+#lorebook-director-workbench .wb-prompt-back {
+    display: none;
+    flex: 0 0 auto;
+    align-self: flex-start;
+    min-height: 44px;
+}
+
+#lorebook-director-workbench .wb-prompt-help-content,
+#lorebook-director-workbench .wb-prompt-help-section {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-width: 0;
+}
+
+#lorebook-director-workbench .wb-prompt-help-content {
+    gap: 24px;
+}
+
+#lorebook-director-workbench .wb-prompt-help-section h3 {
+    font-size: 1em;
+}
+
+#lorebook-director-workbench .wb-prompt-help-section p {
+    margin: 0;
+    font-size: 0.9em;
+    line-height: 1.7;
+    overflow-wrap: anywhere;
+}
+
+#lorebook-director-workbench .wb-prompt-help-section pre {
+    min-width: 0;
+    margin: 0;
+    padding: 10px 12px;
+    border: 1px solid var(--wb-border);
+    border-radius: var(--wb-radius-small);
+    background: var(--wb-soft);
+    color: var(--wb-text);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+#lorebook-director-workbench .wb-prompt-table-scroll {
+    min-width: 0;
+    max-width: 100%;
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+}
+
+#lorebook-director-workbench .wb-prompt-macro-table {
+    width: 100%;
+    min-width: 580px;
+    border-collapse: collapse;
+    font-size: 0.8em;
+    line-height: 1.6;
+    text-align: start;
+}
+
+#lorebook-director-workbench .wb-prompt-macro-table :is(th, td) {
+    padding: 9px 10px;
+    border-bottom: 1px solid var(--wb-border);
+    vertical-align: top;
+    text-align: start;
+}
+
+#lorebook-director-workbench .wb-prompt-macro-table th {
+    background: var(--wb-soft);
+    font-weight: 600;
+}
+
+#lorebook-director-workbench .wb-prompt-macro-table td:first-child {
+    color: var(--wb-accent);
+    white-space: nowrap;
+}
+
+#lorebook-director-workbench .wb-prompt-macro-table td:nth-child(2),
+#lorebook-director-workbench .wb-prompt-macro-table td:last-child {
+    white-space: nowrap;
+}
+
+#lorebook-director-workbench .wb-prompt-macro-table p {
+    margin-block-start: 4px;
+    color: var(--wb-muted);
+    font-size: inherit;
+}
+
+#lorebook-director-workbench[data-compact="true"] .wb-prompt-grid,
+#lorebook-director-workbench[data-compact="true"] .wb-prompt-meta {
+    grid-template-columns: minmax(0, 1fr);
+}
+
+#lorebook-director-workbench[data-compact="true"] .wb-prompt-list-panel {
+    padding-inline-end: 0;
+    border-inline-end: 0;
+}
+
+#lorebook-director-workbench[data-compact="true"] .wb-prompt-list-scroll {
+    flex: 0 0 auto;
+    max-height: none;
+}
+
+#lorebook-director-workbench[data-compact="true"] .wb-prompt-back {
+    display: inline-flex;
+}
+
+#lorebook-director-workbench[data-compact="true"] .wb-prompt-view[data-prompt-editor="true"] :is(.wb-prompt-overview, .wb-prompt-list-panel),
+#lorebook-director-workbench[data-compact="true"] .wb-prompt-view[data-prompt-editor="false"] .wb-prompt-editor-panel {
+    display: none;
+}
+
+#lorebook-director-workbench[data-compact="true"] :is(.wb-prompt-drag-handle, .wb-prompt-menu, .wb-prompt-toggle) {
+    flex-basis: 44px;
+    width: 44px;
+    height: 44px;
+    min-width: 44px;
+    min-height: 44px;
+}
+
+@media (hover: hover) {
+    #lorebook-director-workbench .wb-prompt-macro-option:not(:disabled):hover {
+        background: var(--wb-soft);
+        border-color: var(--wb-selection-border);
+    }
+}
+
+@media (max-width: 760px) {
+    #lorebook-director-workbench .wb-prompt-grid,
+    #lorebook-director-workbench .wb-prompt-meta {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    #lorebook-director-workbench .wb-prompt-list-panel {
+        padding-inline-end: 0;
+        border-inline-end: 0;
+    }
+
+    #lorebook-director-workbench .wb-prompt-list-scroll {
+        flex: 0 0 auto;
+        max-height: none;
+    }
+
+    #lorebook-director-workbench .wb-prompt-back {
+        display: inline-flex;
+    }
+
+    #lorebook-director-workbench .wb-prompt-view[data-prompt-editor="true"] :is(.wb-prompt-overview, .wb-prompt-list-panel),
+    #lorebook-director-workbench .wb-prompt-view[data-prompt-editor="false"] .wb-prompt-editor-panel {
+        display: none;
+    }
+
+    #lorebook-director-workbench :is(.wb-prompt-drag-handle, .wb-prompt-menu, .wb-prompt-toggle) {
+        flex-basis: 44px;
+        width: 44px;
+        height: 44px;
+        min-width: 44px;
+        min-height: 44px;
+    }
+
+    #lorebook-director-workbench .wb-prompt-body .wb-prompt-text {
+        height: 300px;
+        min-height: 200px;
+    }
+}
+
+@media (max-width: 420px) {
+    #lorebook-director-workbench .wb-prompt-heading {
+        gap: 8px;
+    }
+
+    #lorebook-director-workbench .wb-prompt-heading > .wb-field {
+        flex-basis: 100%;
+    }
+}

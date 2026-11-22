@@ -4,6 +4,8 @@ import { element, button, icon, badge, assetUrl, entryTitle, displayText, errorV
 import { EntryEditor } from './entry-editor.js';
 import { SchedulerUI } from './scheduler-ui.js';
 import { APISettingsUI } from './api-settings-ui.js';
+import { PromptSettingsUI } from './prompt-settings-ui.js';
+import { SchedulerHistoryUI } from './scheduler-history-ui.js';
 import { BookCategoryStore, bookCategories, entryCategory, categoryName, CATEGORY_ALL, CATEGORY_CONSTANT } from './book-categories.js';
 import { WorkbenchScrollbars, scrollRegion } from './workbench-scroll.js';
 import { copyText } from '../../../utils.js';
@@ -19,12 +21,13 @@ const FILTERS = [
 ];
 const PAGE_TITLES = {
     library: '世界书列表', entries: '条目列表', editor: '条目编辑',
-    create: '新增条目', scheduler: '调度器', api: '调度器 API 设置', loading: '正在读取',
+    create: '新增条目', scheduler: '调度器', history: '调度历史',
+    api: '调度器 API 设置', prompts: '提示词管理', loading: '正在读取',
 };
 
 export class WorldbookWorkbench {
-    constructor({ getContext, director, api, store, settings }) {
-        Object.assign(this, { getContext, director, api, store, settings });
+    constructor({ getContext, director, api, store, settings, history = director.history }) {
+        Object.assign(this, { getContext, director, api, store, settings, history });
         this.root = null;
         this.popup = null;
         this.opening = null;
@@ -53,13 +56,18 @@ export class WorldbookWorkbench {
         this.editor = null;
         this.scheduler = null;
         this.apiSettings = null;
+        this.promptSettings = null;
+        this.historyUI = null;
         this.categories = new BookCategoryStore(store);
         this.desktopNavOpen = true;
         this.store.onChange = () => this.onStoreChange();
         this.unsubscribe = this.director.subscribe(() => this.onDirectorChange());
+        this.unsubscribeHistory = this.history?.subscribe(() => {
+            if (this.root) this.historyUI?.update();
+        });
         this.unloadHandler = event => {
             if (!this.store.dirty && !this.store.session?.pending && !this.categories.pending
-                && !this.scheduler?.dirty && !this.apiSettings?.dirty) return;
+                && !this.scheduler?.dirty && !this.apiSettings?.dirty && !this.promptSettings?.dirty) return;
             event.preventDefault(); event.returnValue = '';
         };
         window.addEventListener('beforeunload', this.unloadHandler);
@@ -70,7 +78,8 @@ export class WorldbookWorkbench {
         return {
             header: get('header'), context: get('context'), contextName: get('context-name'), tabs: get('tabs'),
             sidebar: get('sidebar'), navToggle: get('nav-toggle'), backdrop: get('nav-backdrop'), title: get('page-title'),
-            view: get('view'), editorTop: get('editor-top'), actions: get('editor-actions'), footer: get('footer'), toast: get('toast'),
+            view: get('view'), editorTop: get('editor-top'), actions: get('editor-actions'), help: get('page-help'),
+            footer: get('footer'), toast: get('toast'),
         };
     }
 
@@ -78,10 +87,7 @@ export class WorldbookWorkbench {
 
     applyTheme() {
         const theme = this.settings.theme;
-        for (const id of [MODULE, `${MODULE}-workbench`]) {
-            const root = document.getElementById(id);
-            if (root) root.dataset.theme = theme;
-        }
+        if (this.root) this.root.dataset.theme = theme;
         if (this.popup) this.popup.dlg.dataset.theme = theme;
     }
 
@@ -149,14 +155,18 @@ export class WorldbookWorkbench {
         root.querySelectorAll('[data-wb="sheet-close"]').forEach(control => { if (!control.classList.contains('wb-backdrop')) control.append(icon('close')); });
         root.querySelector('[data-wb="entries-tab"]').prepend(icon('book'));
         root.querySelector('[data-wb="scheduler-tab"]').prepend(icon('layers'));
+        root.querySelector('[data-wb="history-tab"]').prepend(icon('clock'));
         root.querySelector('[data-wb="api-tab"]').prepend(icon('sliders'));
+        root.querySelector('[data-wb="prompts-tab"]').prepend(icon('message'));
         root.querySelector('[data-wb="nav-toggle"]').append(icon('menu'));
         root.querySelector('[data-wb="nav-close"]').prepend(icon('back'));
         root.querySelector('[data-wb="theme"]').addEventListener('click', () => this.themeSheet());
         root.querySelector('[data-wb="close"]').addEventListener('click', () => this.run(() => popup.completeCancelled()));
         root.querySelector('[data-wb="entries-tab"]').addEventListener('click', () => this.run(() => this.setTab('entries')));
         root.querySelector('[data-wb="scheduler-tab"]').addEventListener('click', () => this.run(() => this.setTab('scheduler')));
+        root.querySelector('[data-wb="history-tab"]').addEventListener('click', () => this.run(() => this.setTab('history')));
         root.querySelector('[data-wb="api-tab"]').addEventListener('click', () => this.run(() => this.setTab('api')));
+        root.querySelector('[data-wb="prompts-tab"]').addEventListener('click', () => this.run(() => this.setTab('prompts')));
         this.nodes.navToggle.addEventListener('click', () => this.setNavigation(!this.navOpen, true));
         root.querySelector('[data-wb="nav-close"]').addEventListener('click', () => this.setNavigation(false, true));
         this.nodes.backdrop.addEventListener('click', () => this.setNavigation(false, true));
@@ -275,6 +285,8 @@ export class WorldbookWorkbench {
         this.sheets?.dispose();
         this.editor?.dispose();
         this.apiSettings?.cancelModelFetch();
+        this.promptSettings?.dispose();
+        this.historyUI?.dispose();
         this.scrollbars?.dispose();
         this.root.removeEventListener('wb-layout', this.layoutHandler);
         this.root = null; this.popup = null; this.editor = null; this.opening = null;
@@ -323,7 +335,7 @@ export class WorldbookWorkbench {
         }
     }
 
-    mountPage(view, content, { top = null, actions = null } = {}) {
+    mountPage(view, content, { top = null, actions = null, help = null } = {}) {
         if (!this.root) return;
         this.view = view;
         const nodes = this.nodes;
@@ -332,6 +344,8 @@ export class WorldbookWorkbench {
         nodes.actions.hidden = !actions;
         nodes.actions.replaceChildren(...(actions ? [actions] : []));
         nodes.footer.hidden = Boolean(actions);
+        nodes.help.hidden = !help;
+        nodes.help.replaceChildren(...(help ? [help] : []));
         nodes.view.replaceChildren(content);
         this.root.classList.toggle('wb-editor-expanded', ['editor', 'create'].includes(view) && Boolean(this.editor?.expanded));
         this.updateTabs(); this.updateContextLabel();
@@ -354,6 +368,8 @@ export class WorldbookWorkbench {
         else if (['editor', 'create'].includes(this.view)) this.editor?.rememberPosition();
         else if (this.view === 'scheduler') this.scheduler?.rememberPosition();
         else if (this.view === 'api') this.apiSettings?.rememberPosition();
+        else if (this.view === 'prompts') this.promptSettings?.rememberPosition();
+        else if (this.view === 'history') this.historyUI?.rememberPosition();
     }
 
     useBook(book) {
@@ -369,7 +385,7 @@ export class WorldbookWorkbench {
     }
 
     async setTab(tab) {
-        if (!this.root || !['entries', 'scheduler', 'api'].includes(tab)) return;
+        if (!this.root || !['entries', 'scheduler', 'history', 'api', 'prompts'].includes(tab)) return;
         this.rememberView();
         this.tab = tab;
         if (tab === 'entries') {
@@ -383,18 +399,30 @@ export class WorldbookWorkbench {
             this.scheduler.refreshBooks(); this.scheduler.update();
             this.mountPage('scheduler', this.scheduler.view, { actions: this.scheduler.actions });
             this.scheduler.restorePosition();
-        } else {
+        } else if (tab === 'history') {
+            this.historyUI ||= new SchedulerHistoryUI(this);
+            this.historyUI.update();
+            this.mountPage('history', this.historyUI.view);
+            this.historyUI.restorePosition();
+        } else if (tab === 'api') {
             this.apiSettings ||= new APISettingsUI(this);
             this.apiSettings.refreshProfiles(); this.apiSettings.update();
             this.mountPage('api', this.apiSettings.view, { actions: this.apiSettings.actions });
             this.apiSettings.queueModels();
             this.apiSettings.restorePosition();
+        } else {
+            this.promptSettings ||= new PromptSettingsUI(this);
+            this.promptSettings.update();
+            this.mountPage('prompts', this.promptSettings.view, {
+                actions: this.promptSettings.actions, help: this.promptSettings.helpButton,
+            });
+            this.promptSettings.restorePosition();
         }
     }
 
     updateTabs() {
         if (!this.root) return;
-        for (const name of ['entries', 'scheduler', 'api']) {
+        for (const name of ['entries', 'scheduler', 'history', 'api', 'prompts']) {
             const control = this.root.querySelector(`[data-wb="${name}-tab"]`);
             if (name === this.tab) control.setAttribute('aria-current', 'page');
             else control.removeAttribute('aria-current');
@@ -841,7 +869,7 @@ export class WorldbookWorkbench {
     }
 
     async guardSettings() {
-        for (const [ui, label] of [[this.scheduler, '调度设置'], [this.apiSettings, 'API 设置']]) {
+        for (const [ui, label] of [[this.scheduler, '调度设置'], [this.apiSettings, 'API 设置'], [this.promptSettings, '提示词']]) {
             if (!ui?.dirty) continue;
             const choice = await this.sheets.choose(`${label}尚未保存`,
                 element('p', { class: 'wb-help', text: '关闭工作台前，可以保存设置、放弃修改，或继续编辑。' }),
@@ -1029,10 +1057,11 @@ export class WorldbookWorkbench {
     themeSheet() {
         const list = element('div');
         for (const [value, label, hint] of [['tavern', '跟随酒馆', '继承酒馆实际配色，随主题变化'], ['light', '日间', '浅色正文，紫绿渐变强调'], ['dark', '夜间', '深色正文，柔和渐变强调']]) {
-            const row = button('', { class: 'wb-option', 'aria-pressed': this.settings.theme === value, onclick: () => {
+            const row = button('', { class: 'wb-option wb-theme-option', 'aria-pressed': this.settings.theme === value, onclick: () => {
                 this.settings.setTheme(value); this.applyTheme(); this.themeSheet();
             } });
-            row.append(icon('palette'), element('span', { class: 'wb-option-main' }, element('strong', { text: label }), element('small', { class: 'wb-option-meta', text: hint })), this.settings.theme === value ? icon('check') : null);
+            row.append(icon('palette'), element('span', { class: 'wb-option-main' }, element('strong', { text: label }), element('small', { class: 'wb-option-meta', text: hint })),
+                element('span', { class: 'wb-theme-marker', 'aria-hidden': true }));
             list.append(row);
         }
         const about = element('details', { class: 'wb-details' }, element('summary', {}, '关于回声书台与素材授权', icon('down')),
@@ -1057,6 +1086,8 @@ export class WorldbookWorkbench {
         this.editor?.update();
         this.scheduler?.update();
         this.apiSettings?.update();
+        this.promptSettings?.update();
+        this.historyUI?.update();
         if (this.view === 'entries') this.renderRows();
         else if (this.view === 'library') this.renderBooks();
     }
@@ -1066,7 +1097,7 @@ export class WorldbookWorkbench {
         if (['editor', 'create'].includes(this.view) && !this.store.session) {
             this.editor?.dispose(); this.editor = null; this.renderEntries();
         } else this.editor?.update();
-        this.scheduler?.update(); this.apiSettings?.update();
+        this.scheduler?.update(); this.apiSettings?.update(); this.promptSettings?.update(); this.historyUI?.update();
         if (this.view === 'entries') { this.renderCategories(); this.renderRows(); }
         else if (this.view === 'library') this.updateDraftNotices();
     }
@@ -1079,6 +1110,7 @@ export class WorldbookWorkbench {
 
     onBindingsChanged() {
         if (!this.root) return;
+        this.historyUI?.update();
         const root = this.root;
         const request = this.bindingRequest = (this.bindingRequest || 0) + 1;
         this.run(async () => {
@@ -1086,7 +1118,7 @@ export class WorldbookWorkbench {
             if (this.root !== root || request !== this.bindingRequest) return;
             this.books = books;
             this.updateContextLabel();
-            this.editor?.update(); this.scheduler?.refreshBooks(); this.scheduler?.update(); this.apiSettings?.update();
+            this.editor?.update(); this.scheduler?.refreshBooks(); this.scheduler?.update(); this.apiSettings?.update(); this.promptSettings?.update();
             if (this.view === 'library') this.renderBooks();
             if (this.view === 'entries') {
                 const book = this.bookInfo(this.currentBook);
@@ -1100,6 +1132,7 @@ export class WorldbookWorkbench {
         ++this.request; ++this.directoryRequest;
         if (!this.root) return;
         this.updateContextLabel();
+        this.historyUI?.update();
         if (this.store.session) { this.editor?.update(); this.onBindingsChanged(); return; }
         this.run(async () => {
             const request = ++this.directoryRequest;
@@ -1108,7 +1141,7 @@ export class WorldbookWorkbench {
             this.books = books;
             if (this.store.session) { this.editor?.update(); return; }
             this.rememberView(); this.useBook(null); this.workspaceView = 'library';
-            this.scheduler?.refreshBooks(); this.scheduler?.update(); this.apiSettings?.update();
+            this.scheduler?.refreshBooks(); this.scheduler?.update(); this.apiSettings?.update(); this.promptSettings?.update();
             if (this.tab === 'entries') this.renderLibrary();
         });
     }

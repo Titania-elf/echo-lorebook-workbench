@@ -134,6 +134,39 @@
     color: var(--wb-accent);
 }
 
+:is(#lorebook-director-workbench, .echo-workbench-popup) .wb-theme-marker {
+    display: grid;
+    place-items: center;
+    flex: 0 0 18px;
+    width: 18px;
+    height: 18px;
+    margin-inline-start: auto;
+    border: 1px solid var(--wb-border);
+    border-radius: 50%;
+    background: var(--wb-field-bg);
+    transition: border-color var(--wb-transition);
+}
+
+:is(#lorebook-director-workbench, .echo-workbench-popup) .wb-theme-marker::before {
+    content: "";
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--wb-accent);
+    opacity: 0;
+    transform: scale(0.5);
+    transition: opacity var(--wb-transition), transform var(--wb-transition);
+}
+
+:is(#lorebook-director-workbench, .echo-workbench-popup) .wb-theme-option[aria-pressed="true"] .wb-theme-marker {
+    border-color: var(--wb-accent);
+}
+
+:is(#lorebook-director-workbench, .echo-workbench-popup) .wb-theme-option[aria-pressed="true"] .wb-theme-marker::before {
+    opacity: 1;
+    transform: scale(1);
+}
+
 :is(#lorebook-director-workbench, .echo-workbench-popup) .wb-option:focus-visible {
     outline-offset: -2px;
 }

@@ -1,5 +1,5 @@
 /* No host-wide resets: every rule belongs to an extension root. */
-:is(#lorebook-director-workbench, #lorebook-director, .echo-workbench-popup) {
+:is(#lorebook-director-workbench, .echo-workbench-popup) {
     box-sizing: border-box;
     min-width: 0;
     color: var(--wb-text);
@@ -11,18 +11,18 @@
     overflow-wrap: anywhere;
 }
 
-:is(#lorebook-director-workbench, #lorebook-director, .echo-workbench-popup) *,
-:is(#lorebook-director-workbench, #lorebook-director, .echo-workbench-popup) *::before,
-:is(#lorebook-director-workbench, #lorebook-director, .echo-workbench-popup) *::after {
+:is(#lorebook-director-workbench, .echo-workbench-popup) *,
+:is(#lorebook-director-workbench, .echo-workbench-popup) *::before,
+:is(#lorebook-director-workbench, .echo-workbench-popup) *::after {
     box-sizing: border-box;
 }
 
-:is(#lorebook-director-workbench, #lorebook-director, .echo-workbench-popup)[hidden],
-:is(#lorebook-director-workbench, #lorebook-director, .echo-workbench-popup) [hidden] {
+:is(#lorebook-director-workbench, .echo-workbench-popup)[hidden],
+:is(#lorebook-director-workbench, .echo-workbench-popup) [hidden] {
     display: none !important;
 }
 
-:is(#lorebook-director-workbench, #lorebook-director, .echo-workbench-popup) :is(button, input, textarea, select) {
+:is(#lorebook-director-workbench, .echo-workbench-popup) :is(button, input, textarea, select) {
     max-width: 100%;
     color: inherit;
     font: inherit;
@@ -37,7 +37,7 @@
     box-shadow: none;
 }
 
-:is(#lorebook-director-workbench, #lorebook-director, .echo-workbench-popup) button {
+:is(#lorebook-director-workbench, .echo-workbench-popup) button {
     cursor: pointer;
     touch-action: manipulation;
     -webkit-tap-highlight-color: transparent;
@@ -45,17 +45,17 @@
     overflow-wrap: anywhere;
 }
 
-:is(#lorebook-director-workbench, #lorebook-director, .echo-workbench-popup) :is(input, textarea, select) {
+:is(#lorebook-director-workbench, .echo-workbench-popup) :is(input, textarea, select) {
     min-width: 0;
     font-size: inherit;
 }
 
-:is(#lorebook-director-workbench, #lorebook-director, .echo-workbench-popup) :is(input, textarea)::placeholder {
+:is(#lorebook-director-workbench, .echo-workbench-popup) :is(input, textarea)::placeholder {
     color: var(--wb-muted);
     opacity: 1;
 }
 
-:is(#lorebook-director-workbench, #lorebook-director, .echo-workbench-popup) :is(input[type="checkbox"], input[type="radio"]) {
+:is(#lorebook-director-workbench, .echo-workbench-popup) :is(input[type="checkbox"], input[type="radio"]) {
     width: 20px;
     height: 20px;
     min-height: 0;
@@ -65,35 +65,35 @@
     vertical-align: middle;
 }
 
-:is(#lorebook-director-workbench, #lorebook-director, .echo-workbench-popup) input[type="number"] {
+:is(#lorebook-director-workbench, .echo-workbench-popup) input[type="number"] {
     font-variant-numeric: tabular-nums;
 }
 
-:is(#lorebook-director-workbench, #lorebook-director, .echo-workbench-popup) input[type="range"] {
+:is(#lorebook-director-workbench, .echo-workbench-popup) input[type="range"] {
     width: 100%;
     min-height: var(--wb-touch-size);
     accent-color: var(--wb-accent);
 }
 
-:is(#lorebook-director-workbench, #lorebook-director, .echo-workbench-popup) :is(button, input, textarea, select):disabled,
-:is(#lorebook-director-workbench, #lorebook-director, .echo-workbench-popup) [aria-disabled="true"] {
+:is(#lorebook-director-workbench, .echo-workbench-popup) :is(button, input, textarea, select):disabled,
+:is(#lorebook-director-workbench, .echo-workbench-popup) [aria-disabled="true"] {
     opacity: 0.5;
     cursor: not-allowed;
 }
 
-:is(#lorebook-director-workbench, #lorebook-director, .echo-workbench-popup):focus-visible,
-:is(#lorebook-director-workbench, #lorebook-director, .echo-workbench-popup) :focus-visible {
+:is(#lorebook-director-workbench, .echo-workbench-popup):focus-visible,
+:is(#lorebook-director-workbench, .echo-workbench-popup) :focus-visible {
     outline: 2px solid var(--wb-focus);
     outline-offset: 3px;
 }
 
-:is(#lorebook-director-workbench, #lorebook-director, .echo-workbench-popup) a {
+:is(#lorebook-director-workbench, .echo-workbench-popup) a {
     color: var(--wb-accent);
     text-decoration: underline;
     text-underline-offset: 3px;
 }
 
-:is(#lorebook-director-workbench, #lorebook-director, .echo-workbench-popup) :is(h1, h2, h3) {
+:is(#lorebook-director-workbench, .echo-workbench-popup) :is(h1, h2, h3) {
     margin: 0;
     color: var(--wb-text);
     font-family: inherit;
@@ -102,12 +102,12 @@
     text-wrap: balance;
 }
 
-:is(#lorebook-director-workbench, #lorebook-director, .echo-workbench-popup) h1 { font-size: 1.3em; }
-:is(#lorebook-director-workbench, #lorebook-director, .echo-workbench-popup) h2 { font-size: 1.15em; }
-:is(#lorebook-director-workbench, #lorebook-director, .echo-workbench-popup) h3 { font-size: 1.05em; }
+:is(#lorebook-director-workbench, .echo-workbench-popup) h1 { font-size: 1.3em; }
+:is(#lorebook-director-workbench, .echo-workbench-popup) h2 { font-size: 1.15em; }
+:is(#lorebook-director-workbench, .echo-workbench-popup) h3 { font-size: 1.05em; }
 :is(#lorebook-director-workbench, .echo-workbench-popup) p { margin: 0; }
 
-:is(#lorebook-director-workbench, #lorebook-director, .echo-workbench-popup) .wb-icon {
+:is(#lorebook-director-workbench, .echo-workbench-popup) .wb-icon {
     display: inline-block;
     width: 20px;
     height: 20px;
@@ -120,14 +120,14 @@
     vertical-align: middle;
 }
 
-:is(#lorebook-director-workbench, #lorebook-director, .echo-workbench-popup) .wb-brand {
+:is(#lorebook-director-workbench, .echo-workbench-popup) .wb-brand {
     display: flex;
     align-items: center;
     gap: 10px;
     min-width: 0;
 }
 
-:is(#lorebook-director-workbench, #lorebook-director, .echo-workbench-popup) .wb-brand-mark {
+:is(#lorebook-director-workbench, .echo-workbench-popup) .wb-brand-mark {
     display: block;
     width: 34px;
     height: 34px;
@@ -135,7 +135,7 @@
     object-fit: contain;
 }
 
-:is(#lorebook-director-workbench, #lorebook-director, .echo-workbench-popup) .wb-brand-name {
+:is(#lorebook-director-workbench, .echo-workbench-popup) .wb-brand-name {
     min-width: 0;
     margin: 0;
     color: var(--wb-text);
@@ -147,8 +147,8 @@
     overflow-wrap: anywhere;
 }
 
-:is(#lorebook-director-workbench, #lorebook-director, .echo-workbench-popup) .wb-button,
-:is(#lorebook-director-workbench, #lorebook-director, .echo-workbench-popup) .wb-icon-button {
+:is(#lorebook-director-workbench, .echo-workbench-popup) .wb-button,
+:is(#lorebook-director-workbench, .echo-workbench-popup) .wb-icon-button {
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -174,7 +174,7 @@
     transition: background var(--wb-transition), border-color var(--wb-transition), color var(--wb-transition);
 }
 
-:is(#lorebook-director-workbench, #lorebook-director, .echo-workbench-popup) .wb-primary {
+:is(#lorebook-director-workbench, .echo-workbench-popup) .wb-primary {
     min-height: 48px;
     border-color: transparent;
     background: var(--wb-action-gradient);
@@ -182,20 +182,20 @@
     font-weight: 600;
 }
 
-:is(#lorebook-director-workbench, #lorebook-director, .echo-workbench-popup) .wb-secondary {
+:is(#lorebook-director-workbench, .echo-workbench-popup) .wb-secondary {
     background: var(--wb-surface);
     color: var(--wb-text);
     border-color: var(--wb-border);
 }
 
-:is(#lorebook-director-workbench, #lorebook-director, .echo-workbench-popup) .wb-text {
+:is(#lorebook-director-workbench, .echo-workbench-popup) .wb-text {
     padding-inline: 10px;
     background: transparent;
     border-color: transparent;
     color: var(--wb-muted);
 }
 
-:is(#lorebook-director-workbench, #lorebook-director, .echo-workbench-popup) .wb-icon-button {
+:is(#lorebook-director-workbench, .echo-workbench-popup) .wb-icon-button {
     width: var(--wb-touch-size);
     height: var(--wb-touch-size);
     padding: 10px;
@@ -204,27 +204,27 @@
     background: transparent;
 }
 
-:is(#lorebook-director-workbench, #lorebook-director, .echo-workbench-popup) .wb-button[aria-pressed="true"] {
+:is(#lorebook-director-workbench, .echo-workbench-popup) .wb-button[aria-pressed="true"] {
     background: var(--wb-selection-gradient);
     border-color: var(--wb-selection-border);
     color: var(--wb-text);
 }
 
-:is(#lorebook-director-workbench, #lorebook-director, .echo-workbench-popup) .wb-button[data-tone="danger"] {
+:is(#lorebook-director-workbench, .echo-workbench-popup) .wb-button[data-tone="danger"] {
     border-color: var(--wb-danger-border);
     background: var(--wb-danger-soft);
     color: var(--wb-danger);
 }
 
-:is(#lorebook-director-workbench, #lorebook-director, .echo-workbench-popup) .wb-button[aria-busy="true"] {
+:is(#lorebook-director-workbench, .echo-workbench-popup) .wb-button[aria-busy="true"] {
     cursor: progress;
 }
 
-:is(#lorebook-director-workbench, #lorebook-director, .echo-workbench-popup) :is(.wb-help, .wb-muted) {
+:is(#lorebook-director-workbench, .echo-workbench-popup) :is(.wb-help, .wb-muted) {
     color: var(--wb-muted);
 }
 
-:is(#lorebook-director-workbench, #lorebook-director, .echo-workbench-popup) .wb-help {
+:is(#lorebook-director-workbench, .echo-workbench-popup) .wb-help {
     display: block;
     max-width: var(--wb-reading-width);
     font-size: .78em;
@@ -233,7 +233,7 @@
     overflow-wrap: anywhere;
 }
 
-:is(#lorebook-director-workbench, #lorebook-director, .echo-workbench-popup) .wb-badge {
+:is(#lorebook-director-workbench, .echo-workbench-popup) .wb-badge {
     display: inline-flex;
     align-items: center;
     gap: 4px;
@@ -249,17 +249,17 @@
     overflow-wrap: anywhere;
 }
 
-:is(#lorebook-director-workbench, #lorebook-director, .echo-workbench-popup) .wb-badge .wb-icon {
+:is(#lorebook-director-workbench, .echo-workbench-popup) .wb-badge .wb-icon {
     width: 13px;
     height: 13px;
 }
 
-:is(#lorebook-director-workbench, #lorebook-director, .echo-workbench-popup) .wb-badge[data-tone="danger"] {
+:is(#lorebook-director-workbench, .echo-workbench-popup) .wb-badge[data-tone="danger"] {
     background: var(--wb-danger-soft);
     color: var(--wb-danger);
 }
 
-:is(#lorebook-director-workbench, #lorebook-director, .echo-workbench-popup) .wb-empty {
+:is(#lorebook-director-workbench, .echo-workbench-popup) .wb-empty {
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -270,18 +270,18 @@
     text-align: center;
 }
 
-:is(#lorebook-director-workbench, #lorebook-director, .echo-workbench-popup) .wb-empty > .wb-icon {
+:is(#lorebook-director-workbench, .echo-workbench-popup) .wb-empty > .wb-icon {
     width: 32px;
     height: 32px;
     color: var(--wb-muted);
 }
 
-:is(#lorebook-director-workbench, #lorebook-director, .echo-workbench-popup) .wb-empty :is(p, .wb-help) {
+:is(#lorebook-director-workbench, .echo-workbench-popup) .wb-empty :is(p, .wb-help) {
     max-width: 28em;
     color: var(--wb-muted);
 }
 
-:is(#lorebook-director-workbench, #lorebook-director, .echo-workbench-popup) .wb-error {
+:is(#lorebook-director-workbench, .echo-workbench-popup) .wb-error {
     padding: 16px;
     border: 1px solid var(--wb-danger-border);
     border-radius: var(--wb-radius-control);
@@ -291,7 +291,7 @@
     overflow-wrap: anywhere;
 }
 
-:is(#lorebook-director-workbench, #lorebook-director, .echo-workbench-popup) .wb-error > .wb-icon {
+:is(#lorebook-director-workbench, .echo-workbench-popup) .wb-error > .wb-icon {
     color: var(--wb-danger);
 }
 
@@ -307,7 +307,7 @@
 :is(#lorebook-director-workbench, .echo-workbench-popup) .wb-switch-row > div { flex: 1; min-width: 0; }
 :is(#lorebook-director-workbench, .echo-workbench-popup) .wb-switch-row label { font-size: .9em; }
 
-:is(#lorebook-director-workbench, #lorebook-director, .echo-workbench-popup) :is(h4, h5, h6, pre, code, kbd, samp, option) {
+:is(#lorebook-director-workbench, .echo-workbench-popup) :is(h4, h5, h6, pre, code, kbd, samp, option) {
     font-family: inherit;
 }
 :is(#lorebook-director-workbench, .echo-workbench-popup) .wb-switch:has(> .wb-switch-track) {
@@ -320,21 +320,21 @@
 :is(#lorebook-director-workbench, .echo-workbench-popup) .wb-switch > .wb-switch-track { display: none; }
 
 @media (hover: hover) {
-    :is(#lorebook-director-workbench, #lorebook-director, .echo-workbench-popup) :is(.wb-secondary, .wb-text, .wb-icon-button):not(:disabled):not([aria-disabled="true"]):hover {
+    :is(#lorebook-director-workbench, .echo-workbench-popup) :is(.wb-secondary, .wb-text, .wb-icon-button):not(:disabled):not([aria-disabled="true"]):hover {
         background: var(--wb-soft);
         color: var(--wb-text);
     }
 
-    :is(#lorebook-director-workbench, #lorebook-director, .echo-workbench-popup) .wb-primary:not(:disabled):not([aria-disabled="true"]):hover {
+    :is(#lorebook-director-workbench, .echo-workbench-popup) .wb-primary:not(:disabled):not([aria-disabled="true"]):hover {
         background: var(--wb-action-hover-gradient);
     }
 }
 
 @media (prefers-reduced-motion: reduce) {
-    :is(#lorebook-director-workbench, #lorebook-director, .echo-workbench-popup),
-    :is(#lorebook-director-workbench, #lorebook-director, .echo-workbench-popup) *,
-    :is(#lorebook-director-workbench, #lorebook-director, .echo-workbench-popup) *::before,
-    :is(#lorebook-director-workbench, #lorebook-director, .echo-workbench-popup) *::after,
+    :is(#lorebook-director-workbench, .echo-workbench-popup),
+    :is(#lorebook-director-workbench, .echo-workbench-popup) *,
+    :is(#lorebook-director-workbench, .echo-workbench-popup) *::before,
+    :is(#lorebook-director-workbench, .echo-workbench-popup) *::after,
     .echo-workbench-popup::backdrop {
         animation: none !important;
         transition: none !important;

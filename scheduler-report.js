@@ -15,7 +15,7 @@ export function apiReport(report) {
 }
 
 export function resultSummary(report) {
-    const history = `读取 ${report.historyCount ?? 0} 层完整聊天`;
+    const history = `读取 ${report.historyCount ?? 0} 层 AI 消息全文`;
     const api = apiReport(report);
     if (report.mode === 'cancelled') return `${history}；${api}。${report.error || '本轮生成已取消，待注入结果已清理。'}`;
     if (report.mode === 'fallback') return `${history}；${api}。本轮调度结果已丢弃，正文按原生规则继续。${report.error || ''}`;

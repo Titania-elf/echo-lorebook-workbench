@@ -6,6 +6,14 @@
     padding-block: 4px 8px;
 }
 
+#lorebook-director-workbench .wb-field:has(> #wb-config-maxEntries, > #wb-config-tokenBudget, > #wb-config-recentMessages) {
+    grid-template-rows: minmax(1.4em, auto) auto max(38px, 2.4em);
+}
+
+#lorebook-director-workbench :is(#wb-config-maxEntries, #wb-config-tokenBudget, #wb-config-recentMessages) {
+    grid-row: 3;
+}
+
 :is(#lorebook-director-workbench, .echo-workbench-popup) .wb-scene {
     display: flex;
     flex-direction: column;

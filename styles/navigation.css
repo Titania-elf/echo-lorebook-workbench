@@ -1,10 +1,23 @@
 /* Feature navigation and compact editing surfaces. Text inherits the host theme. */
+#lorebook-director-workbench .wb-header-help {
+    display: flex;
+    align-items: center;
+}
+
 #lorebook-director-workbench.wb-app {
     --wb-gutter: 20px;
     --wb-constant: color-mix(in srgb, #668ac5 75%, var(--wb-text));
+    --wb-nav-duration: 400ms;
+    --wb-nav-easing: cubic-bezier(0.25, 0.1, 0.25, 1);
+    --wb-sidebar-shift: -100%;
     display: grid;
     grid-template-columns: var(--wb-sidebar-width) minmax(0, 1fr);
     grid-template-rows: minmax(0, 1fr);
+    transition: grid-template-columns var(--wb-nav-duration) var(--wb-nav-easing);
+}
+
+#lorebook-director-workbench:dir(rtl) {
+    --wb-sidebar-shift: 100%;
 }
 
 #lorebook-director-workbench[data-nav="closed"] {
@@ -26,11 +39,26 @@
     border-inline-end: 1px solid var(--wb-border);
     background: var(--wb-soft);
     overflow: hidden;
+    visibility: visible;
+    transform: translateX(0);
+    transition: transform var(--wb-nav-duration) var(--wb-nav-easing), visibility 0s linear;
 }
 
 #lorebook-director-workbench[data-nav="closed"] .wb-sidebar {
     visibility: hidden;
+    transform: translateX(var(--wb-sidebar-shift));
+    transition-delay: 0s, var(--wb-nav-duration);
     pointer-events: none;
+}
+
+@starting-style {
+    #lorebook-director-workbench[data-nav="open"] .wb-sidebar {
+        transform: translateX(var(--wb-sidebar-shift));
+    }
+
+    #lorebook-director-workbench[data-compact="false"][data-nav="open"] {
+        grid-template-columns: 0 minmax(0, 1fr);
+    }
 }
 
 #lorebook-director-workbench .wb-sidebar .wb-brand {
@@ -468,6 +496,7 @@
     border: 1px solid var(--wb-border);
     border-radius: 999px;
     background: var(--wb-soft-strong);
+    transition: background var(--wb-transition), border-color var(--wb-transition);
 }
 
 #lorebook-director-workbench .wb-toggle-track::before {
@@ -478,7 +507,9 @@
     width: 12px;
     height: 12px;
     border-radius: 50%;
-    background: var(--wb-switch-thumb);
+    background: var(--wb-muted);
+    box-shadow: var(--wb-shadow-small);
+    transition: inset-inline-start var(--wb-transition), background var(--wb-transition);
 }
 
 #lorebook-director-workbench .wb-entry-toggle[aria-checked="true"] .wb-toggle-track {
@@ -487,6 +518,7 @@
 }
 
 #lorebook-director-workbench .wb-entry-toggle[aria-checked="true"] .wb-toggle-track::before {
+    background: var(--wb-on-accent);
     inset-inline-start: 13px;
 }
 

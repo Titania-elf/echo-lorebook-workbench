@@ -1,18 +1,23 @@
 import {
     MODULE, EXTENSION_NAME, EXTENSION_FOLDER, settingsWithDefaults, makeCatalog, digest, entryId, historyChain, previousSnapshot,
-    selectorPayload, SELECTOR_SYSTEM, SUMMARY_SYSTEM, validateSelection, allocateSelection,
+    selectorPayload, validateSelection, allocateSelection,
     recordSnapshot, parseJsonObject, recentContext,
 } from './core.js';
 import { SchedulerScanGate, verifyNativeSources } from './scheduler-native.js';
+import { buildPromptMessages } from './prompt-templates.js';
+import { historyChatInfo, historyConnectionInfo, historyAbortError, historyFailure } from './scheduler-history.js';
 
 const SUPPORTED_TYPES = new Set(['normal', 'regenerate', 'swipe', 'continue']);
+const HISTORY_TIMEOUT_CODES = new Set(['ECHO_REQUEST_TIMEOUT', 'ECHO_SCHEDULER_TIMEOUT']);
+const HISTORY_CANCEL_CODES = new Set(['ECHO_USER_CANCELLED', 'ECHO_CONTEXT_CHANGED', 'ECHO_GENERATION_ENDED', 'ECHO_SUPERSEDED']);
 
 export class LorebookDirector {
-    constructor({ getContext, getEntries, native, requestModel, onChange = () => {}, onWarning = () => {} }) {
+    constructor({ getContext, getEntries, native, requestModel, history, onChange = () => {}, onWarning = () => {} }) {
         this.getContext = getContext;
         this.getEntries = getEntries;
         this.native = native;
         this.requestModel = requestModel;
+        this.history = history;
         this.onChange = onChange;
         this.onWarning = onWarning;
         this.catalog = [];
@@ -67,6 +72,95 @@ export class LorebookDirector {
         }
     }
 
+    beginHistory(op, context, type, counts) {
+        if (!this.history || op.historyId || op.kind === 'summary') return;
+        try {
+            const id = this.history.begin({
+                ...op.historyChat, ...historyConnectionInfo(context, op.config),
+                kind: op.kind, generationType: type, startedAt: Date.now(), counts,
+            });
+            if (!id) return;
+            op.historyId = id;
+            op.historyState = {
+                requestStatus: 'pending', validationStatus: 'pending', applicationStatus: 'pending',
+                sealed: false, responseSeen: false, receivedAt: null, hasBody: false, stage: 'prompt', counts: { ...counts },
+            };
+            op.historyAbort = () => this.failHistory(op, op.controller.signal.reason
+                || historyAbortError('辅助请求已取消。', 'ECHO_USER_CANCELLED'));
+            op.controller.signal.addEventListener('abort', op.historyAbort, { once: true });
+        } catch {
+            console.warn('[回声书台] 调度历史记录未能开始，调度照常继续。');
+        }
+    }
+
+    patchHistory(turn, fields) {
+        if (!turn?.historyId || !turn.historyState) return;
+        const state = turn.historyState;
+        for (const key of ['requestStatus', 'validationStatus', 'applicationStatus', 'lateResponse']) {
+            if (fields[key] !== undefined) state[key] = fields[key];
+        }
+        if (fields.counts) state.counts = { ...state.counts, ...fields.counts };
+        try { this.history?.patch(turn.historyId, fields); }
+        catch { console.warn('[回声书台] 调度历史更新失败，调度照常继续。'); }
+    }
+
+    completeHistory(turn, fields) {
+        if (!turn?.historyId || !turn.historyState || turn.historyState.sealed) return;
+        const state = turn.historyState;
+        state.sealed = true;
+        for (const key of ['requestStatus', 'validationStatus', 'applicationStatus']) {
+            if (fields[key] !== undefined) state[key] = fields[key];
+        }
+        if (fields.counts) state.counts = { ...state.counts, ...fields.counts };
+        try { this.history?.complete(turn.historyId, fields); }
+        catch { console.warn('[回声书台] 调度历史收尾失败，调度照常继续。'); }
+    }
+
+    receiveHistory(turn, { content, receivedAt, late = false }) {
+        if (!turn?.historyId || !turn.historyState) return;
+        const state = turn.historyState;
+        const delayed = Boolean(late || turn.controller?.signal.aborted
+            || (state.sealed && state.requestStatus !== 'returned'));
+        if (state.responseSeen && !delayed) return;
+        const rawResponse = typeof content === 'string' ? content : '';
+        if (!state.responseSeen) {
+            state.responseSeen = true;
+            state.receivedAt = Number.isFinite(receivedAt) ? receivedAt : Date.now();
+            state.hasBody = Boolean(rawResponse.trim());
+        }
+        const fields = { rawResponse, lateResponse: Boolean(state.lateResponse || delayed) };
+        if (!delayed && !state.sealed && state.hasBody) fields.requestStatus = 'returned';
+        this.patchHistory(turn, fields);
+    }
+
+    failHistory(turn, error, stage = turn?.historyState?.stage || 'request') {
+        if (!turn?.historyId || !turn.historyState) return;
+        const state = turn.historyState;
+        if (['preview', 'applied', 'unused'].includes(state.applicationStatus)) return;
+        let failure;
+        try { failure = historyFailure(error, turn.config || this.config); }
+        catch { failure = { error: '调度未完成，无法读取失败说明。', errorCode: '' }; }
+        const errorCode = failure.errorCode || (stage === 'validation' ? 'ECHO_SELECTION_INVALID'
+            : stage === 'prompt' ? 'ECHO_PROMPT_INVALID' : stage === 'application' ? 'ECHO_APPLICATION_FAILED' : 'ECHO_REQUEST_FAILED');
+        if (state.sealed) {
+            if (state.requestStatus === 'returned') this.patchHistory(turn, {
+                applicationStatus: 'unused', applicationReason: failure.error,
+                error: failure.error, errorCode, errorStage: 'application',
+            });
+            return;
+        }
+        const returned = state.requestStatus === 'returned' && state.hasBody;
+        const requestStatus = returned ? 'returned' : HISTORY_TIMEOUT_CODES.has(errorCode) ? 'timeout'
+            : HISTORY_CANCEL_CODES.has(errorCode) ? 'cancelled' : 'failed';
+        this.completeHistory(turn, {
+            requestStatus,
+            validationStatus: returned && stage === 'validation' ? 'invalid' : 'not-run',
+            applicationStatus: 'unused', applicationReason: failure.error,
+            error: failure.error, errorCode, errorStage: returned && stage !== 'validation' ? 'application' : stage,
+            finishedAt: returned && state.receivedAt !== null ? state.receivedAt : Date.now(),
+        });
+    }
+
     async sourceSaved({ book, uid, deleted = false, context: originContext }) {
         this.invalidate('原世界书已保存，下次生成使用已保存的原文。');
         if (this.report) this.report = { ...this.report, stale: true };
@@ -95,25 +189,32 @@ export class LorebookDirector {
         this.notify();
     }
 
-    invalidate(reason = '上下文已改变，下次生成会重新选择。', clear = false, { warning = true, discardCommitted = false } = {}) {
+    invalidate(reason = '上下文已改变，下次生成会重新选择。', clear = false, {
+        warning = true, discardCommitted = false, reasonCode = 'ECHO_CONTEXT_CHANGED',
+    } = {}) {
+        const reasonError = reason instanceof Error ? reason : historyAbortError(reason, reasonCode);
+        const message = reasonError.message;
         const committed = this.gate?.committed && !clear && !discardCommitted ? this.gate : null;
         const pending = this.operation?.kind === 'generation' ? this.operation : committed ? null : this.gate;
+        for (const turn of new Set([this.operation, this.gate, ...this.scanGates])) {
+            if (turn !== committed && turn?.historyId !== committed?.historyId) this.failHistory(turn, reasonError);
+        }
         this.revision++;
-        this.operation?.controller.abort(new Error(reason));
+        this.operation?.controller.abort(reasonError);
         this.operation = null;
         for (const gate of this.scanGates) {
             if (gate !== committed) gate.cancel();
         }
         this.gate = committed;
-        if (pending && warning) this.fallback(pending, reason);
+        if (pending && warning) this.fallback(pending, reasonError);
         if (clear) { this.catalog = []; this.activeBooks = []; this.catalogError = ''; this.report = null; }
         if (committed && this.report) this.report.stale = true;
-        this.status = committed ? `${reason}本轮资料已经交给提示词构造，修改从下次生成生效。` : reason;
+        this.status = committed ? `${message}本轮资料已经交给提示词构造，修改从下次生成生效。` : message;
         this.notify();
     }
 
     startGeneration(_type, options = {}, _dryRun = false) {
-        this.invalidate('生成请求开始，等待本轮调度。', false, { discardCommitted: true });
+        this.invalidate('生成请求开始，等待本轮调度。', false, { discardCommitted: true, reasonCode: 'ECHO_SUPERSEDED' });
         this.generationEpoch++;
         this.generationSignal = options.signal || null;
         this.generationStopped = false;
@@ -122,7 +223,9 @@ export class LorebookDirector {
     stopGeneration() {
         const pending = this.operation?.kind === 'generation' ? this.operation : this.gate;
         this.generationStopped = true;
-        this.invalidate('生成已停止，辅助请求和待注入选择已清理。', false, { warning: false, discardCommitted: true });
+        this.invalidate('生成已停止，辅助请求和待注入选择已清理。', false, {
+            warning: false, discardCommitted: true, reasonCode: 'ECHO_USER_CANCELLED',
+        });
         if (pending) this.cancelReport(pending, '正文生成已停止，本轮调度已取消。');
         this.notify();
     }
@@ -130,8 +233,10 @@ export class LorebookDirector {
     endGeneration() {
         if (this.gate || this.operation?.kind === 'generation') {
             const pending = this.operation?.kind === 'generation' ? this.operation : this.gate;
-            this.invalidate('生成结束，待处理调度已清理。', false, { warning: false, discardCommitted: true });
-            this.cancelReport(pending, '正文生成已结束，本轮调度没有完成提示词构造。');
+            this.invalidate('生成结束，待处理调度已清理。', false, {
+                warning: false, discardCommitted: true, reasonCode: 'ECHO_GENERATION_ENDED',
+            });
+            this.cancelReport(pending, '正文生成已结束，本轮调度没有完成提示词构造。', 'ECHO_GENERATION_ENDED');
             this.notify();
         }
         this.generationSignal = null;
@@ -145,13 +250,15 @@ export class LorebookDirector {
     }
 
     fallback(turn, reason) {
+        this.failHistory(turn, reason);
+        const message = typeof reason === 'string' ? reason : reason?.message || '本轮调度未完成。';
         if (turn.epoch !== this.generationEpoch || turn.chatKey !== this.chatKey() || turn.id !== this.latestWork) return;
         const info = turn.result || turn.info || {};
         this.report = {
             ...info, mode: 'fallback', blue: [], selected: [], skipped: [], actual: [],
-            construction: 'native', error: reason, at: Date.now(), chatKey: turn.chatKey,
+            construction: 'native', error: message, at: Date.now(), chatKey: turn.chatKey,
         };
-        this.status = `本轮已跳过调度，继续原生生成：${reason}`;
+        this.status = `本轮已跳过调度，继续原生生成：${message}`;
         if (!turn.warned) {
             turn.warned = true;
             try { this.onWarning(this.status); }
@@ -159,13 +266,16 @@ export class LorebookDirector {
         }
     }
 
-    cancelReport(turn, reason) {
+    cancelReport(turn, reason, reasonCode = 'ECHO_USER_CANCELLED') {
+        const error = reason instanceof Error ? reason : historyAbortError(reason, reasonCode);
+        this.failHistory(turn, error);
+        const message = error.message;
         if (turn.id !== this.latestWork || turn.epoch !== this.generationEpoch || turn.chatKey !== this.chatKey()) return;
         this.report = {
             ...(turn.result || turn.info || {}), mode: 'cancelled', blue: [], selected: [], skipped: [], actual: [],
-            construction: 'cancelled', error: reason, at: Date.now(), chatKey: turn.chatKey,
+            construction: 'cancelled', error: message, at: Date.now(), chatKey: turn.chatKey,
         };
-        this.status = reason;
+        this.status = message;
     }
 
     updateSettings(patch) {
@@ -200,7 +310,7 @@ export class LorebookDirector {
     }
 
     begin(kind) {
-        this.invalidate('正在准备目录…');
+        this.invalidate('正在准备目录…', false, { reasonCode: 'ECHO_SUPERSEDED' });
         const context = this.getContext();
         if (!context.chatId) throw new Error('请先打开一个角色聊天。');
         const op = {
@@ -213,11 +323,20 @@ export class LorebookDirector {
                 catalogLoaded: false,
             },
         };
+        try { op.historyChat = historyChatInfo(context); }
+        catch { /* History identity must not prevent a scheduler request. */ }
         this.latestWork = op.id;
-        if (kind !== 'summary') op.timer = setTimeout(() => op.controller.abort(new Error('调度等待超时，已跳过本轮调度。')), op.config.timeoutSeconds * 1000);
+        if (kind !== 'summary') op.timer = setTimeout(() => op.controller.abort(
+            historyAbortError('调度等待超时，已跳过本轮调度。', 'ECHO_SCHEDULER_TIMEOUT'),
+        ), op.config.timeoutSeconds * 1000);
         if (kind === 'generation' && this.generationSignal) {
             const signal = this.generationSignal;
-            const cancel = () => op.controller.abort(signal.reason || new Error('正文生成已取消。'));
+            const cancel = () => {
+                const error = historyAbortError(signal.reason?.message
+                    || (typeof signal.reason === 'string' ? signal.reason : '正文生成已取消。'), 'ECHO_USER_CANCELLED');
+                if (signal.reason !== undefined) error.cause = signal.reason;
+                op.controller.abort(error);
+            };
             signal.addEventListener('abort', cancel, { once: true });
             if (signal.aborted) cancel();
             op.detach = () => signal.removeEventListener('abort', cancel);
@@ -231,7 +350,7 @@ export class LorebookDirector {
         if (op.controller.signal.aborted) throw op.controller.signal.reason || new Error('请求已取消。');
         if (this.operation !== op || op.revision !== this.revision || op.signature !== this.signature()
             || op.epoch !== this.generationEpoch) {
-            throw new Error('对话或设置已改变，已丢弃旧请求的结果。');
+            throw historyAbortError('对话或设置已改变，已丢弃旧请求的结果。', 'ECHO_CONTEXT_CHANGED');
         }
     }
 
@@ -239,6 +358,7 @@ export class LorebookDirector {
         if (!op) return;
         clearTimeout(op.timer);
         op.detach?.();
+        if (op.historyAbort) op.controller.signal.removeEventListener('abort', op.historyAbort);
         if (this.operation === op) this.operation = null;
     }
 
@@ -295,7 +415,7 @@ export class LorebookDirector {
     async select(chat, op, type = 'normal') {
         op.info.historyCount = recentContext(chat, op.config.recentMessages).length;
         op.info.historyRequested = op.config.recentMessages;
-        this.status = `正在读取最近 ${op.info.historyCount} 层完整聊天和已保存的世界书…`;
+        this.status = `正在读取最近 ${op.info.historyCount} 层 AI 消息全文和已保存的世界书…`;
         this.notify();
         const snapshot = await this.waitFor(this.native.schedulerSnapshot(op.config.books, { signal: op.controller.signal }), op);
         this.assertCurrent(op);
@@ -329,30 +449,61 @@ export class LorebookDirector {
             this.native.assertSchedulerSlots([...blue, ...pins.selected], type);
         }
         if (modelCatalog.length && pins.selected.length < op.config.maxEntries && pins.tokens < op.config.tokenBudget) {
+            this.beginHistory(op, context, type, {
+                blueAvailable: blue.length, fixedGreen: pins.selected.length, greenCandidates: modelCatalog.length,
+            });
             const input = selectorPayload(catalog, chat, previous, overrides, op.config, pins.selected);
             input.remainingGreenTokenBudget = op.config.tokenBudget - pins.tokens;
+            const messages = buildPromptMessages('selector', op.config.promptTemplates, { input, context, config: op.config });
+            if (op.historyState) op.historyState.stage = 'request';
             op.info.apiAttempted = true;
-            this.status = `筛选 API 正在阅读 ${blue.length} 条蓝灯、${pins.selected.length} 条固定绿灯和 ${modelCatalog.length} 条候选绿灯的全文…`;
+            this.status = `正在提交筛选提示词：本轮有 ${blue.length} 条蓝灯、${pins.selected.length} 条固定绿灯和 ${modelCatalog.length} 条候选绿灯。`;
             this.notify();
-            const response = await this.waitFor(this.requestModel(context, op.config, [
-                { role: 'system', content: SELECTOR_SYSTEM },
-                { role: 'user', content: JSON.stringify(input) },
-            ], op.controller.signal, 1800, { onDispatch: info => {
-                this.assertCurrent(op);
-                op.info.apiSubmitted = true;
-                op.info.apiDispatched = !info.submittedOnly;
-                op.info.apiModel = info.model || '';
-            } }), op);
+            let response;
+            try {
+                const pending = this.requestModel(context, op.config, messages, op.controller.signal, 1800, {
+                    onDispatch: info => {
+                        this.assertCurrent(op);
+                        op.info.apiSubmitted = true;
+                        op.info.apiDispatched = !info.submittedOnly;
+                        op.info.apiModel = info.model || '';
+                        this.patchHistory(op, { submittedAt: Date.now(), ...(info.model ? { model: info.model } : {}) });
+                    },
+                    onResponse: observation => this.receiveHistory(op, observation),
+                });
+                const observed = Promise.resolve(pending).then(content => {
+                    this.receiveHistory(op, {
+                        content, receivedAt: Date.now(), late: op.controller.signal.aborted,
+                    });
+                    return content;
+                });
+                response = await this.waitFor(observed, op);
+            } catch (error) {
+                this.failHistory(op, error, 'request');
+                throw error;
+            }
             this.assertCurrent(op);
             op.info.apiDispatched = true;
             op.info.apiSucceeded = true;
-            choice = validateSelection(response, modelCatalog);
+            if (op.historyState) op.historyState.stage = 'validation';
+            try { choice = validateSelection(response, modelCatalog); }
+            catch (error) {
+                this.failHistory(op, error, 'validation');
+                throw error;
+            }
+            this.completeHistory(op, {
+                requestStatus: 'returned', validationStatus: 'valid',
+                applicationStatus: op.kind === 'generation' ? 'waiting' : 'pending',
+                finishedAt: op.historyState?.receivedAt ?? Date.now(),
+            });
+            if (op.historyState) op.historyState.stage = 'application';
         } else {
             op.info.apiSkipReason = !modelCatalog.length ? '没有可供模型筛选的绿灯'
                 : pins.selected.length >= op.config.maxEntries ? '固定绿灯已用满条目上限' : '固定绿灯已用满 Token 预算';
         }
         const selected = await allocateSelection(choice, catalog, overrides, op.config, countTokens);
         this.assertCurrent(op);
+        this.patchHistory(op, { counts: { selected: selected.selected.length } });
         const constants = [];
         for (const item of blue) {
             const rawCount = await countTokens(item.entry.content);
@@ -418,6 +569,7 @@ export class LorebookDirector {
                 this.gate = new SchedulerScanGate({
                     snapshot, catalog, prepared, result, input, contextSize, type: op.type,
                     revision: this.revision, signature: op.signature, epoch: op.epoch, chatKey: op.chatKey, id: op.id,
+                    historyId: op.historyId, historyState: op.historyState,
                 });
                 this.scanGates.add(this.gate);
                 this.status = `蓝灯 ${result.blue.length} 条默认加入，绿灯 ${result.selected.length} 条入选，等待前后位置的世界书构造。`;
@@ -426,13 +578,14 @@ export class LorebookDirector {
                 this.status = `本轮没有可接管的蓝灯或绿灯；未调用筛选 API（${result.apiSkipReason}），正文继续原生生成。`;
             }
         } catch (error) {
+            this.failHistory(op, error);
             if (this.gate && this.gate.id === op?.id) {
                 this.gate.cancel();
                 this.gate = null;
             }
             if (op && (this.generationStopped || this.generationSignal?.aborted)) {
                 this.cancelReport(op, '正文生成已取消，本轮调度已清理。');
-            } else if (op) this.fallback(op, error.message);
+            } else if (op) this.fallback(op, error);
         } finally {
             this.finishOperation(op);
             this.notify();
@@ -458,7 +611,9 @@ export class LorebookDirector {
         if (!this.gateIsCurrent()) {
             const gate = this.gate;
             const cancelled = this.generationStopped || this.generationSignal?.aborted;
-            this.invalidate('当前聊天或调度设置已改变，已跳过本轮调度。', false, { warning: !cancelled });
+            this.invalidate('当前聊天或调度设置已改变，已跳过本轮调度。', false, {
+                warning: !cancelled, reasonCode: cancelled ? 'ECHO_USER_CANCELLED' : 'ECHO_CONTEXT_CHANGED',
+            });
             if (cancelled) {
                 this.cancelReport(gate, '正文生成已取消，本轮调度已清理。');
                 this.notify();
@@ -488,7 +643,7 @@ export class LorebookDirector {
                 gate.cancel();
                 if (this.gate === gate) this.gate = null;
                 if (this.generationStopped || this.generationSignal?.aborted) this.cancelReport(gate, '正文生成已取消，本轮调度已清理。');
-                else this.fallback(gate, '聊天或设置已变化，本轮选择已丢弃。');
+                else this.fallback(gate, historyAbortError('聊天或设置已变化，本轮选择已丢弃。', 'ECHO_CONTEXT_CHANGED'));
             }
             try {
                 if (!gate.cancelled) {
@@ -547,6 +702,7 @@ export class LorebookDirector {
         if (!accepted.length && this.gate.prepared.length) return;
         this.report.actual = accepted;
         this.report.construction = 'scan-accepted';
+        this.patchHistory(this.gate, { counts: { included: accepted.length } });
         this.gate.committed = true;
         this.gate.restoreScan();
         this.status = '本轮资料已经交给酒馆构造提示词，辅助筛选已结束。';
@@ -573,6 +729,7 @@ export class LorebookDirector {
         }
         const actual = new Set(this.report?.actual || []);
         const context = this.getContext();
+        let memoryFailure;
         try {
             if (gate.revision === this.revision && gate.signature === this.signature()) {
                 this.state(context).snapshots = recordSnapshot(this.state(context).snapshots, input, {
@@ -583,9 +740,15 @@ export class LorebookDirector {
         } catch (error) {
             this.report.memoryError = `场景参考未保存：${error.message}`;
             console.warn('[回声书台] 场景参考保存失败，正文照常继续', error);
+            try { memoryFailure = historyFailure(this.report.memoryError, this.config); }
+            catch { memoryFailure = { error: '场景参考未保存，无法读取失败说明。' }; }
         }
         this.report.promptPrepared = true;
         this.report.construction = 'prepared';
+        this.patchHistory(gate, {
+            applicationStatus: 'applied', counts: { included: actual.size },
+            ...(memoryFailure ? { ...memoryFailure, errorStage: 'memory', errorCode: 'ECHO_MEMORY_SAVE_FAILED' } : {}),
+        });
         this.status = `调度完成：蓝灯 ${result.blue.length} 条、绿灯 ${result.selected.length} 条，世界书构造接纳 ${actual.size} 条；原来的正文请求继续。${this.report.memoryError || ''}`;
         gate.finish();
         this.scanGates.delete(gate);
@@ -601,8 +764,10 @@ export class LorebookDirector {
             const { result } = await this.select(chat, op);
             this.assertCurrent(op);
             this.report = { ...result, mode: 'preview', actual: null, construction: 'preview', at: Date.now(), chatKey: op.chatKey };
+            this.patchHistory(op, { applicationStatus: 'preview' });
             this.status = `试选完成：蓝灯 ${result.blue.length} 条常驻、绿灯 ${result.selected.length} 条入选。${result.apiDispatched ? '筛选 API 已调用。' : `未调用筛选 API：${result.apiSkipReason}。`}没有注入正文或更新场景记忆。`;
         } catch (error) {
+            this.failHistory(op, error);
             if (!op || this.operation === op) {
                 this.report = { ...op?.info, mode: 'preview-error', blue: [], selected: [], skipped: [], actual: null, error: error.message, chatKey: op?.chatKey || this.chatKey() };
                 this.status = `试选失败：${error.message}`;
@@ -639,10 +804,12 @@ export class LorebookDirector {
             for (const [index, items] of batches.entries()) {
                 this.status = `生成 AI 目录：第 ${index + 1}/${batches.length} 批（仅处理新增/改动条目）。`;
                 this.notify();
-                const text = await this.requestModel(this.getContext(), op.config, [
-                    { role: 'system', content: SUMMARY_SYSTEM },
-                    { role: 'user', content: JSON.stringify(items.map(x => ({ id: x.id, title: x.title, content: x.content }))) },
-                ], op.controller.signal, 2200);
+                const requestContext = this.getContext();
+                const input = items.map(x => ({ id: x.id, title: x.title, content: x.content }));
+                const messages = buildPromptMessages('summary', op.config.promptTemplates, {
+                    input, context: requestContext, config: op.config, batchIndex: index + 1, batchCount: batches.length,
+                });
+                const text = await this.requestModel(requestContext, op.config, messages, op.controller.signal, 2200);
                 this.assertCurrent(op);
                 const parsed = parseJsonObject(text);
                 if (!Array.isArray(parsed.summaries)) throw new Error('目录响应缺少 summaries 数组。');

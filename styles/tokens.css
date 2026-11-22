@@ -1,5 +1,5 @@
 /* Shared tokens are local to the extension and its dedicated native popup. */
-:is(#lorebook-director-workbench, #lorebook-director, .echo-workbench-popup) {
+:is(#lorebook-director-workbench, .echo-workbench-popup) {
     --wb-brand-a: #8360c3;
     --wb-brand-b: #2ebf91;
     --wb-gradient: linear-gradient(115deg, var(--wb-brand-a), var(--wb-brand-b));

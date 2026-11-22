@@ -3,23 +3,25 @@ import { getSortedEntries } from '../../../world-info.js';
 import { MODULE, EXTENSION_NAME, EXTENSION_FOLDER, settingsWithDefaults } from './core.js';
 import { LorebookDirector } from './director.js';
 import { requestModel } from './transport.js';
-import { mountUI } from './ui.js';
 import { NativeWorldbookAdapter } from './native-adapter.js';
 import { EntryStore } from './entry-store.js';
 import { WorkbenchSettings } from './workbench-state.js';
 import { WorldbookWorkbench } from './workbench.js';
 import { element } from './workbench-utils.js';
 import { showSchedulerWarning } from './scheduler-notice.js';
+import { SchedulerHistoryStore } from './scheduler-history-store.js';
 
 const native = new NativeWorldbookAdapter(getContext);
+const history = new SchedulerHistoryStore({ getContext });
 const director = new LorebookDirector({
-    getContext, getEntries: getSortedEntries, native, requestModel,
+    getContext, getEntries: getSortedEntries, native, requestModel, history,
     onWarning: showSchedulerWarning,
 });
 globalThis.lorebookDirectorInterceptor = (...args) => director.intercept(...args);
 
 jQuery(async () => {
     const context = getContext();
+    void history.initialize();
     context.extensionSettings[MODULE] = settingsWithDefaults(context.extensionSettings[MODULE]);
     const disabled = context.extensionSettings.disabledExtensions;
     if (Array.isArray(disabled)) {
@@ -39,7 +41,7 @@ jQuery(async () => {
         onBegin: () => director.invalidate('正在保存原世界书，旧调度选择已失效。'),
         onCommit: change => director.sourceSaved(change),
     });
-    const workbench = new WorldbookWorkbench({ getContext, director, api, store, settings });
+    const workbench = new WorldbookWorkbench({ getContext, director, api, store, settings, history });
     const mountMenu = () => {
         const menu = document.getElementById('extensionsMenu');
         if (!menu || document.getElementById(`${MODULE}-menu`)) return Boolean(menu);
@@ -89,12 +91,5 @@ jQuery(async () => {
             workbench.onBindingsChanged();
         });
     }
-    try {
-        await mountUI(director);
-        workbench.applyTheme();
-    } catch (error) {
-        console.error('[Echo Lorebook Workbench] 设置面板加载失败', error);
-        // An invisible enabled interceptor must not silently incur API calls.
-        director.updateSettings({ enabled: false });
-    }
+    await director.loadCatalog();
 });

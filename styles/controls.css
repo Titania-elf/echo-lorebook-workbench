@@ -1,5 +1,5 @@
 /* Explicit light colors stay local; typography still inherits the tavern font. */
-:is(#lorebook-director-workbench, #lorebook-director, .echo-workbench-popup)[data-theme="light"] :where(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="hidden"]), textarea, select) {
+:is(#lorebook-director-workbench, .echo-workbench-popup)[data-theme="light"] :where(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="hidden"]), textarea, select) {
     color: var(--wb-text) !important;
     -webkit-text-fill-color: var(--wb-text) !important;
     background-color: var(--wb-field-bg) !important;
@@ -9,30 +9,30 @@
     filter: none !important;
 }
 
-:is(#lorebook-director-workbench, #lorebook-director, .echo-workbench-popup)[data-theme="light"] :is(input, textarea)::placeholder {
+:is(#lorebook-director-workbench, .echo-workbench-popup)[data-theme="light"] :is(input, textarea)::placeholder {
     color: var(--wb-muted) !important;
     -webkit-text-fill-color: var(--wb-muted) !important;
     opacity: 1;
 }
 
-:is(#lorebook-director-workbench, #lorebook-director, .echo-workbench-popup)[data-theme="light"] select {
+:is(#lorebook-director-workbench, .echo-workbench-popup)[data-theme="light"] select {
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='m2 2 4 4 4-4' fill='none' stroke='%23696672' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E") !important;
     background-repeat: no-repeat !important;
     background-position: right 8px center !important;
     background-size: 10px 7px !important;
 }
 
-:is(#lorebook-director-workbench, #lorebook-director, .echo-workbench-popup)[data-theme="light"] select :is(option, optgroup) {
+:is(#lorebook-director-workbench, .echo-workbench-popup)[data-theme="light"] select :is(option, optgroup) {
     color: var(--wb-text) !important;
     -webkit-text-fill-color: var(--wb-text) !important;
     background-color: var(--wb-surface) !important;
 }
 
-:is(#lorebook-director-workbench, #lorebook-director, .echo-workbench-popup)[data-theme="light"] :is(input, textarea, select):focus {
+:is(#lorebook-director-workbench, .echo-workbench-popup)[data-theme="light"] :is(input, textarea, select):focus {
     border-color: var(--wb-focus) !important;
 }
 
-:is(#lorebook-director-workbench, #lorebook-director, .echo-workbench-popup)[data-theme="light"] [aria-invalid="true"] {
+:is(#lorebook-director-workbench, .echo-workbench-popup)[data-theme="light"] [aria-invalid="true"] {
     border-color: var(--wb-danger) !important;
 }
 
@@ -51,38 +51,46 @@
     display: block;
     appearance: none;
     -webkit-appearance: none;
-    width: 20px;
+    width: 32px;
     height: 20px;
-    min-width: 20px;
+    min-width: 32px;
     min-height: 20px;
-    flex: 0 0 20px;
+    flex: 0 0 32px;
     margin: 0;
+    padding: 0;
     border: 1px solid var(--wb-border);
-    border-radius: 4px;
-    background: var(--wb-field-bg);
+    border-radius: 99px;
+    background: var(--wb-soft-strong);
     box-shadow: none;
     outline: none;
     overflow: visible;
+    clip-path: none;
     transform: none;
     filter: none;
+    transition: background var(--wb-transition), border-color var(--wb-transition);
 }
 
 #lorebook-director-workbench .wb-managed-option > input[type="checkbox"]::before {
     content: "";
     position: absolute;
-    top: 3px;
-    left: 6px;
-    width: 6px;
-    height: 10px;
-    border: solid var(--wb-on-accent);
-    border-width: 0 2px 2px 0;
-    background: transparent;
-    box-shadow: none;
+    top: 2px;
+    left: 2px;
+    width: 14px;
+    height: 14px;
+    border: 0;
+    border-radius: 50%;
+    background: var(--wb-muted);
+    box-shadow: var(--wb-shadow-small);
     clip-path: none;
-    transform: rotate(45deg);
+    transform: translateX(0);
     transform-origin: center;
-    opacity: 0;
-    transition: opacity var(--wb-transition);
+    opacity: 1;
+    transition: transform var(--wb-transition), background var(--wb-transition);
+}
+
+#lorebook-director-workbench .wb-managed-option > input[type="checkbox"]::after {
+    content: none;
+    display: none;
 }
 
 #lorebook-director-workbench .wb-managed-option > input[type="checkbox"]:checked {
@@ -91,13 +99,17 @@
 }
 
 #lorebook-director-workbench .wb-managed-option > input[type="checkbox"]:checked::before {
-    transform: rotate(45deg);
-    opacity: 1;
+    background: var(--wb-on-accent);
+    transform: translateX(12px);
 }
 
 #lorebook-director-workbench .wb-managed-option > input[type="checkbox"]:focus-visible {
     outline: 2px solid var(--wb-focus);
     outline-offset: 2px;
+}
+
+#lorebook-director-workbench .wb-managed-option:has(> input:disabled) {
+    cursor: not-allowed;
 }
 
 #lorebook-director-workbench .wb-api-toolbar,

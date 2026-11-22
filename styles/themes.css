@@ -1,5 +1,5 @@
 /* Explicit themes are complete palettes; the brand endpoints stay unchanged. */
-:is(#lorebook-director-workbench, #lorebook-director, .echo-workbench-popup)[data-theme="light"] {
+:is(#lorebook-director-workbench, .echo-workbench-popup)[data-theme="light"] {
     --wb-bg: #f5f5f7;
     --wb-surface: #ffffff;
     --wb-text: #28272e;
@@ -24,7 +24,7 @@
     color-scheme: light;
 }
 
-:is(#lorebook-director-workbench, #lorebook-director, .echo-workbench-popup)[data-theme="dark"] {
+:is(#lorebook-director-workbench, .echo-workbench-popup)[data-theme="dark"] {
     --wb-bg: #19191d;
     --wb-surface: #232329;
     --wb-text: #f1eff6;
@@ -48,7 +48,7 @@
     color-scheme: dark;
 }
 
-:is(#lorebook-director-workbench, #lorebook-director, .echo-workbench-popup)[data-theme="tavern"] {
+:is(#lorebook-director-workbench, .echo-workbench-popup)[data-theme="tavern"] {
     --wb-bg: var(--SmartThemeBlurTintColor, #f5f5f7);
     --wb-surface: var(--SmartThemeBlurTintColor, #ffffff);
     --wb-text: var(--SmartThemeBodyColor, #28272e);

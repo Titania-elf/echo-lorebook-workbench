@@ -5,7 +5,9 @@
             <nav class="wb-navigation" data-wb="tabs" data-wb-scroll aria-label="功能页面">
                 <button type="button" id="wb-tab-entries" class="wb-nav-item" data-wb="entries-tab" aria-current="page">世界书工作台</button>
                 <button type="button" id="wb-tab-scheduler" class="wb-nav-item" data-wb="scheduler-tab">调度器</button>
+                <button type="button" id="wb-tab-history" class="wb-nav-item" data-wb="history-tab">调度历史</button>
                 <button type="button" id="wb-tab-api" class="wb-nav-item" data-wb="api-tab">调度器 API 设置</button>
+                <button type="button" id="wb-tab-prompts" class="wb-nav-item" data-wb="prompts-tab">提示词管理</button>
             </nav>
         </div>
         <div class="wb-sidebar-tools">
@@ -18,7 +20,10 @@
         <header class="wb-header" data-wb="header">
             <button type="button" class="wb-icon-button" data-wb="nav-toggle" aria-label="展开或收起功能导航" aria-controls="wb-sidebar" aria-expanded="true"></button>
             <h2 id="wb-page-title" data-wb="page-title">世界书列表</h2>
-            <button type="button" class="wb-icon-button" data-wb="close" aria-label="关闭工作台"></button>
+            <div class="wb-header-actions">
+                <div class="wb-header-help" data-wb="page-help" hidden></div>
+                <button type="button" class="wb-icon-button" data-wb="close" aria-label="关闭工作台"></button>
+            </div>
         </header>
         <div class="wb-context" data-wb="context"><span data-wb="context-name"></span></div>
         <div class="wb-editor-top" data-wb="editor-top" hidden></div>

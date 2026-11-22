@@ -4,9 +4,9 @@ import { scrollRegion } from './workbench-scroll.js';
 import { catalogScope, resultSummary, choiceState } from './scheduler-report.js';
 
 const NUMBER_SETTINGS = [
-    ['maxEntries', '绿灯最多条目', 1, 30],
-    ['tokenBudget', '绿灯 Token 预算', 128, 16000],
-    ['recentMessages', '读取最近楼层', 1, 30],
+    ['maxEntries', '绿灯最多条目', 1, 30, '条'],
+    ['tokenBudget', '绿灯 Token 预算', 128, 16000, 'Token'],
+    ['recentMessages', '读取最近 AI 楼层', 1, 30, '层', '；仅统计 AI 楼层，用户楼层不计入。'],
 ];
 
 /** Scheduler presentation reuses the existing director, never makes its own model request. */
@@ -41,26 +41,31 @@ export class SchedulerUI {
 
     build() {
         this.enabled = element('input', {
-            id: 'wb-scheduler-enabled', type: 'checkbox', 'aria-label': '启用生成前调度', checked: this.baseline.enabled,
+            id: 'wb-scheduler-enabled', type: 'checkbox', role: 'switch', 'aria-label': '启用生成前调度', checked: this.baseline.enabled,
         });
         this.enabled.addEventListener('change', () => this.update());
         this.enabledNote = element('p', { class: 'wb-help' });
         this.preview = button('试选（调用 API）', { glyph: 'play', onclick: () => this.workbench.run(() => this.director.preview()) });
         this.summary = button('AI 展示概括（调用 API）', { onclick: () => this.workbench.run(() => this.workbench.summarize()) });
         this.refresh = button('刷新本地目录', { glyph: 'refresh', onclick: () => this.workbench.run(() => this.director.loadCatalog()) });
-        this.cancel = button('取消辅助请求', { onclick: () => this.director.invalidate('辅助请求已取消；若正文仍继续，本轮使用原生世界书规则。') });
+        this.cancel = button('取消辅助请求', { onclick: () => this.director.invalidate('辅助请求已取消；若正文仍继续，本轮使用原生世界书规则。', false, { reasonCode: 'ECHO_USER_CANCELLED' }) });
         this.save = button('保存调度设置', { glyph: 'save', kind: 'primary', onclick: () => this.workbench.run(() => this.apply()) });
         this.discardButton = button('放弃修改', { onclick: () => this.discard() });
         this.dirtyState = element('span', { class: 'wb-dirty-status', role: 'status' });
         this.actions = element('div', { class: 'wb-action-row wb-scheduler-footer' }, this.dirtyState,
             element('div', { class: 'wb-action-buttons' }, this.preview, this.summary, this.cancel, this.discardButton, this.save));
-        const fields = NUMBER_SETTINGS.map(([key, label, min, max]) => {
+        const fields = NUMBER_SETTINGS.map(([key, label, min, max, unit, note = '']) => {
             const input = element('input', {
                 id: `wb-config-${key}`, type: 'number', inputMode: 'numeric', min, max, step: 1, value: this.baseline[key],
             });
             input.addEventListener('input', () => this.update());
             this.numbers.set(key, input);
-            return element('div', { class: 'wb-field' }, element('label', { htmlFor: input.id, text: label }), input);
+            const rangeHint = element('small', {
+                id: `${input.id}-range`, class: 'wb-help',
+                text: `范围：${min.toLocaleString('en-US')}～${max.toLocaleString('en-US')}${unit === 'Token' ? ' ' : ''}${unit}（整数）${note}`,
+            });
+            input.setAttribute('aria-describedby', rangeHint.id);
+            return element('div', { class: 'wb-field' }, element('label', { htmlFor: input.id, text: label }), rangeHint, input);
         });
         this.bookList = element('div', { class: 'wb-managed-list' });
         this.bookSearch = element('input', {
@@ -86,7 +91,7 @@ export class SchedulerUI {
                 element('div', { class: 'wb-scheduler-heading' }, element('div', {}, element('h3', { text: '生成前调度' }), this.enabledNote),
                     element('label', { class: 'wb-switch', htmlFor: this.enabled.id }, this.enabled, element('span', { class: 'wb-switch-track', 'aria-hidden': 'true' }))),
                 element('div', { class: 'wb-settings-grid' }, fields),
-                element('p', { class: 'wb-help', text: '每层聊天和条目正文完整读取。蓝灯默认常驻，不占绿灯数量或 Token 预算。' })),
+                element('p', { class: 'wb-help', text: '读取的 AI 楼层和条目正文均保留全文。蓝灯默认常驻，不占绿灯数量或 Token 预算。' })),
             managed, this.scopeNote, this.status,
             element('section', { class: 'wb-scene' }, element('div', { class: 'wb-scene-header' }, element('strong', { text: '当前场景' }), badge('场景工作集')), this.sceneText,
                 element('p', { class: 'wb-help', text: '仅作为下次判断的参考；每次重新筛选，不自动沿用上轮绿灯。' }), this.clear),
@@ -114,7 +119,7 @@ export class SchedulerUI {
         for (const name of names) {
             let row = this.bookRows.get(name);
             if (!row) {
-                const input = element('input', { type: 'checkbox', 'aria-label': `托管 ${name}`, checked: this.selectedBooks.has(name) });
+                const input = element('input', { type: 'checkbox', role: 'switch', 'aria-label': `托管 ${name}`, checked: this.selectedBooks.has(name) });
                 input.addEventListener('change', () => {
                     if (input.checked) this.selectedBooks.add(name); else this.selectedBooks.delete(name);
                     this.filterBooks(); this.update();

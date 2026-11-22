@@ -171,7 +171,7 @@ export class APISettingsUI {
         const scheme = this.scheme;
         const models = scheme?.models || [];
         this.modelSelect.replaceChildren(element('option', { value: '', text: models.length ? '选择模型' : '尚未获取模型列表' }),
-            models.map(id => element('option', { value: id, text: id })));
+            ...models.map(id => element('option', { value: id, text: id })));
         if (scheme?.model && !models.includes(scheme.model)) this.modelSelect.append(element('option', { value: scheme.model, text: `当前模型：${scheme.model}` }));
         this.modelSelect.value = scheme?.model || '';
     }

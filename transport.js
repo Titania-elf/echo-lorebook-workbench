@@ -2,12 +2,16 @@ import { createGenerationParameters } from '../../../openai.js';
 import { selectedAPIScheme, customAPIData } from './api-connections.js';
 
 /** Send directly through ST's backend, without Generate/quiet-prompt recursion or global setting changes. */
-export async function requestModel(context, config, messages, parentSignal, maxTokens = 1800, { onDispatch = () => {} } = {}) {
+export async function requestModel(context, config, messages, parentSignal, maxTokens = 1800, { onDispatch = () => {}, onResponse = () => {} } = {}) {
     const controller = new AbortController();
     const onAbort = () => controller.abort(parentSignal.reason || new Error('请求已取消。'));
     parentSignal.addEventListener('abort', onAbort, { once: true });
     if (parentSignal.aborted) onAbort();
-    const timer = setTimeout(() => controller.abort(new Error('辅助模型请求超时；请检查连接或提高超时秒数。')), config.timeoutSeconds * 1000);
+    const timer = setTimeout(() => {
+        const error = new Error('辅助模型请求超时；请检查连接或提高超时秒数。');
+        error.code = 'ECHO_REQUEST_TIMEOUT';
+        controller.abort(error);
+    }, config.timeoutSeconds * 1000);
     let rejectOnAbort;
     const cancelled = new Promise((_, reject) => {
         rejectOnAbort = () => reject(controller.signal.reason || new Error('请求已取消。'));
@@ -36,10 +40,11 @@ export async function requestModel(context, config, messages, parentSignal, maxT
             // This service may still prepare a saved preset before making its HTTP call.
             onDispatch({ model: profile.model || profile.name || '', submittedOnly: true });
             // Saved connection profiles keep provider selection and secrets inside SillyTavern.
-            result = await context.ConnectionManagerRequestService.sendRequest(config.profileId, messages, maxTokens, {
+            result = await context.ConnectionManagerRequestService.sendRequest(config.profileId, structuredClone(messages), maxTokens, {
                 stream: false, signal: controller.signal, extractData: true, includePreset: true,
             }, {
                 stream: false, n: 1, enable_web_search: false, request_images: false,
+                custom_prompt_post_processing: 'none',
                 tools: undefined, tool_choice: undefined, stop: [], logit_bias: {},
             });
         } else {
@@ -50,6 +55,7 @@ export async function requestModel(context, config, messages, parentSignal, maxT
             Object.assign(settings, {
                 openai_max_tokens: maxTokens, stream_openai: false, n: 1, function_calling: false,
                 enable_web_search: false, request_images: false,
+                custom_prompt_post_processing: 'none',
             });
             const model = context.getChatCompletionModel(settings);
             if (!model) throw new Error('当前聊天补全连接未选择模型。');
@@ -58,8 +64,21 @@ export async function requestModel(context, config, messages, parentSignal, maxT
             for (const key of ['tools', 'tool_choice', 'stop', 'logit_bias', 'logprobs', 'top_logprobs']) delete data[key];
             data.stream = false;
             data.n = 1;
+            data.custom_prompt_post_processing = 'none';
             onDispatch({ model });
             result = await context.ChatCompletionService.sendRequest(data, true, controller.signal);
+        }
+        try {
+            const observation = onResponse({
+                content: typeof result?.content === 'string' ? result.content : '',
+                receivedAt: Date.now(),
+                late: controller.signal.aborted,
+            });
+            Promise.resolve(observation).catch(() => {
+                console.warn('[回声书台] 辅助请求返回记录失败。');
+            });
+        } catch {
+            console.warn('[回声书台] 辅助请求返回记录失败。');
         }
         if (controller.signal.aborted) throw controller.signal.reason;
         if (typeof result?.content !== 'string' || !result.content.trim()) {
@@ -71,7 +90,12 @@ export async function requestModel(context, config, messages, parentSignal, maxT
         return await Promise.race([send(), cancelled]);
     } catch (error) {
         if (controller.signal.aborted) throw controller.signal.reason || error;
-        if (error.cause?.message) throw new Error(`${error.message}：${error.cause.message}`, { cause: error });
+        if (error.cause?.message) {
+            const wrapped = new Error(`${error.message}：${error.cause.message}`, { cause: error });
+            const code = error.code ?? error.cause.code;
+            if (code !== undefined) wrapped.code = code;
+            throw wrapped;
+        }
         throw error;
     } finally {
         clearTimeout(timer);
