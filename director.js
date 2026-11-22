@@ -5,7 +5,10 @@ import {
 } from './core.js';
 import { SchedulerScanGate, verifyNativeSources } from './scheduler-native.js';
 import { buildPromptMessages } from './prompt-templates.js';
-import { historyChatInfo, historyConnectionInfo, historyAbortError, historyFailure } from './scheduler-history.js';
+import {
+    historyChatInfo, historyConnectionInfo, historyEntryGroups, historyEffectiveEntries,
+    historyAbortError, historyFailure,
+} from './scheduler-history.js';
 
 const SUPPORTED_TYPES = new Set(['normal', 'regenerate', 'swipe', 'continue']);
 const HISTORY_TIMEOUT_CODES = new Set(['ECHO_REQUEST_TIMEOUT', 'ECHO_SCHEDULER_TIMEOUT']);
@@ -72,18 +75,19 @@ export class LorebookDirector {
         }
     }
 
-    beginHistory(op, context, type, counts) {
+    beginHistory(op, context, type, counts, plannedEntries) {
         if (!this.history || op.historyId || op.kind === 'summary') return;
         try {
             const id = this.history.begin({
                 ...op.historyChat, ...historyConnectionInfo(context, op.config),
-                kind: op.kind, generationType: type, startedAt: Date.now(), counts,
+                kind: op.kind, generationType: type, startedAt: Date.now(), counts, plannedEntries,
             });
             if (!id) return;
             op.historyId = id;
             op.historyState = {
                 requestStatus: 'pending', validationStatus: 'pending', applicationStatus: 'pending',
                 sealed: false, responseSeen: false, receivedAt: null, hasBody: false, stage: 'prompt', counts: { ...counts },
+                plannedEntries,
             };
             op.historyAbort = () => this.failHistory(op, op.controller.signal.reason
                 || historyAbortError('辅助请求已取消。', 'ECHO_USER_CANCELLED'));
@@ -100,6 +104,7 @@ export class LorebookDirector {
             if (fields[key] !== undefined) state[key] = fields[key];
         }
         if (fields.counts) state.counts = { ...state.counts, ...fields.counts };
+        if (fields.plannedEntries) state.plannedEntries = fields.plannedEntries;
         try { this.history?.patch(turn.historyId, fields); }
         catch { console.warn('[回声书台] 调度历史更新失败，调度照常继续。'); }
     }
@@ -448,10 +453,14 @@ export class LorebookDirector {
         if (op.kind === 'generation') {
             this.native.assertSchedulerSlots([...blue, ...pins.selected], type);
         }
+        let historyCatalog;
         if (modelCatalog.length && pins.selected.length < op.config.maxEntries && pins.tokens < op.config.tokenBudget) {
+            historyCatalog = catalog.map(item => ({
+                id: item.id, book: String(item.entry.world), title: item.title,
+            }));
             this.beginHistory(op, context, type, {
                 blueAvailable: blue.length, fixedGreen: pins.selected.length, greenCandidates: modelCatalog.length,
-            });
+            }, historyEntryGroups(historyCatalog, blue, pins.selected));
             const input = selectorPayload(catalog, chat, previous, overrides, op.config, pins.selected);
             input.remainingGreenTokenBudget = op.config.tokenBudget - pins.tokens;
             const messages = buildPromptMessages('selector', op.config.promptTemplates, { input, context, config: op.config });
@@ -503,7 +512,10 @@ export class LorebookDirector {
         }
         const selected = await allocateSelection(choice, catalog, overrides, op.config, countTokens);
         this.assertCurrent(op);
-        this.patchHistory(op, { counts: { selected: selected.selected.length } });
+        this.patchHistory(op, {
+            counts: { selected: selected.selected.length },
+            ...(historyCatalog ? { plannedEntries: historyEntryGroups(historyCatalog, blue, selected.selected) } : {}),
+        });
         const constants = [];
         for (const item of blue) {
             const rawCount = await countTokens(item.entry.content);
@@ -727,7 +739,9 @@ export class LorebookDirector {
             this.notify();
             return;
         }
-        const actual = new Set(this.report?.actual || []);
+        const actual = new Set(gate.activeMap instanceof Map
+            ? gate.acceptedIds([...gate.activeMap.values()]) : []);
+        this.report.actual = [...actual];
         const context = this.getContext();
         let memoryFailure;
         try {
@@ -747,6 +761,7 @@ export class LorebookDirector {
         this.report.construction = 'prepared';
         this.patchHistory(gate, {
             applicationStatus: 'applied', counts: { included: actual.size },
+            effectiveEntries: historyEffectiveEntries(gate.historyState?.plannedEntries, actual),
             ...(memoryFailure ? { ...memoryFailure, errorStage: 'memory', errorCode: 'ECHO_MEMORY_SAVE_FAILED' } : {}),
         });
         this.status = `调度完成：蓝灯 ${result.blue.length} 条、绿灯 ${result.selected.length} 条，世界书构造接纳 ${actual.size} 条；原来的正文请求继续。${this.report.memoryError || ''}`;

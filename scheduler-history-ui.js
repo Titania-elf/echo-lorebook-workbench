@@ -81,6 +81,73 @@ function matchesStatus(record, status) {
     return record.requestStatus === status;
 }
 
+function entrySnapshot(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value) || !Array.isArray(value.blue) || !Array.isArray(value.green)) return null;
+    return Object.fromEntries(['blue', 'green'].map(kind => [kind, value[kind]
+        .filter(entry => entry && typeof entry === 'object' && !Array.isArray(entry))
+        .map(entry => ({ id: text(entry.id), book: text(entry.book), title: text(entry.title) }))]));
+}
+
+function entryPresentation(record) {
+    const planned = entrySnapshot(record.plannedEntries);
+    const effective = entrySnapshot(record.effectiveEntries);
+    // A valid response can arrive before the final budget allocation completes.
+    const allocationComplete = Number.isFinite(record.counts?.selected) && record.counts.selected >= 0;
+    const preliminary = record.requestStatus === 'pending' || record.validationStatus !== 'valid' || !allocationComplete;
+    if (record.applicationStatus === 'applied' && effective) {
+        return {
+            snapshot: effective, effective: true, preliminary: false,
+            heading: '本次生效条目', note: '以酒馆构造接纳的结果为依据。',
+        };
+    }
+    if (!planned) {
+        return {
+            snapshot: null, heading: '条目标题', note: '',
+            missing: '这条历史未记录条目标题。',
+        };
+    }
+    if (record.applicationStatus === 'applied') {
+        return {
+            snapshot: planned, preliminary, heading: '本次计划条目',
+            note: `这条历史未记录实际生效条目标题。下方仅显示当时记录的计划。${preliminary ? '候选绿灯的最终入选情况尚未记录。' : ''}`,
+        };
+    }
+    if (record.applicationStatus === 'unused') {
+        return {
+            snapshot: planned, preliminary,
+            heading: preliminary ? '本次已准备条目（未采用）' : '本次计划条目（未采用）',
+            note: `本次调度未采用下方${preliminary ? '已准备的蓝灯和固定绿灯' : '计划'}。原生世界书是否生效，不能从这份调度计划判断。${preliminary ? '候选绿灯的最终入选情况尚未记录。' : ''}`,
+        };
+    }
+    if (preliminary) {
+        return {
+            snapshot: planned, preliminary: true, heading: '本次已准备条目',
+            note: `${unconfirmed(record) ? '最终结果未确认。' : ''}目前仅记录已准备的蓝灯和固定绿灯；候选绿灯的最终入选结果尚未记录。`,
+        };
+    }
+    if (record.kind === 'preview' || record.applicationStatus === 'preview') {
+        return {
+            snapshot: planned, preliminary: false, heading: '本次试选条目',
+            note: '仅为手动试选结果，未用于正文注入。',
+        };
+    }
+    return {
+        snapshot: planned, preliminary: false, heading: '本次计划条目',
+        note: record.applicationStatus === 'waiting'
+            ? '正在等待酒馆构造；下方计划尚未确认实际生效。'
+            : '下方是本次入选计划，实际生效条目尚未确认。',
+    };
+}
+
+function emptyEntryText(kind, presentation) {
+    const label = kind === 'blue' ? '蓝灯' : '绿灯';
+    if (presentation.effective) return `本次调度没有被酒馆构造接纳的${label}条目。`;
+    if (presentation.preliminary) return kind === 'blue'
+        ? '当前记录未包含已准备的蓝灯条目。'
+        : '当前记录未包含已准备的固定绿灯；候选绿灯的最终入选情况尚未记录。';
+    return `当时记录的计划中没有${kind === 'green' ? '入选的' : ''}${label}条目。`;
+}
+
 /** Reads browser-local history without replacing the response being examined. */
 export class SchedulerHistoryUI {
     constructor(workbench) {
@@ -141,7 +208,7 @@ export class SchedulerHistoryUI {
         });
         this.search = element('input', {
             id: 'wb-history-search', type: 'search', autocomplete: 'off',
-            placeholder: '搜索模型、方案、聊天或错误', 'aria-label': '搜索调度历史',
+            placeholder: '搜索模型、方案、聊天、条目或错误', 'aria-label': '搜索调度历史',
         });
         this.search.addEventListener('input', () => {
             this.query = this.search.value.trim().toLocaleLowerCase();
@@ -184,6 +251,23 @@ export class SchedulerHistoryUI {
             return element('div', { class: `wb-history-fact${key === 'application' ? ' wb-history-application' : ''}` },
                 element('dt', { text: label }), value);
         });
+        this.entriesHeading = element('h4');
+        this.entriesNote = element('p', { class: 'wb-help' });
+        this.entriesMissing = element('p', { class: 'wb-help' });
+        this.entryGroups = new Map();
+        const entryGroupNodes = ['blue', 'green'].map(kind => {
+            const heading = element('h5', { id: `wb-history-entries-${kind}` });
+            const list = element('ul', { class: 'wb-history-entry-list', 'aria-labelledby': heading.id });
+            const empty = element('p', { class: 'wb-help wb-history-entry-empty' });
+            const shell = scrollRegion(list, 'wb-history-entry-scroll');
+            this.entryGroups.set(kind, { heading, list, empty, shell });
+            return element('section', {
+                class: 'wb-history-entry-group', 'data-kind': kind, 'aria-labelledby': heading.id,
+            }, heading, shell, empty);
+        });
+        this.entriesGrid = element('div', { class: 'wb-history-entries-grid' }, entryGroupNodes);
+        this.entriesSection = element('section', { class: 'wb-history-entries' },
+            this.entriesHeading, this.entriesNote, this.entriesMissing, this.entriesGrid);
         this.failureTitle = element('h4');
         this.failureStage = element('p', { class: 'wb-help' });
         this.failureText = element('p');
@@ -202,7 +286,7 @@ export class SchedulerHistoryUI {
         this.responseShell = scrollRegion(this.response, 'wb-history-response-scroll');
         this.detailContent = element('div', { class: 'wb-history-detail-content' },
             element('dl', { class: 'wb-history-facts' }, factNodes),
-            this.failure,
+            this.entriesSection, this.failure,
             element('section', { class: 'wb-history-response-section wb-field' },
                 element('label', { htmlFor: this.response.id, text: '模型返回原文' }),
                 this.lateNote, this.responseEmpty, this.responseShell));
@@ -244,7 +328,9 @@ export class SchedulerHistoryUI {
             if (this.scope === 'current' && record.chatKey !== current.chatKey) return false;
             if (!matchesStatus(record, this.status)) return false;
             if (!this.query) return true;
-            return [record.model, record.schemeName, record.chatName, record.error, record.applicationReason]
+            const snapshot = entryPresentation(record).snapshot;
+            const titles = ['blue', 'green'].flatMap(kind => (snapshot?.[kind] || []).flatMap(entry => [entry.title, entry.book]));
+            return [record.model, record.schemeName, record.chatName, record.error, record.applicationReason, ...titles]
                 .map(text).join('\n').toLocaleLowerCase().includes(this.query);
         });
         let selected = records.find(record => record.id === this.selectedId);
@@ -363,6 +449,7 @@ export class SchedulerHistoryUI {
         };
         for (const [key, value] of Object.entries(facts)) writeText(this.facts.get(key), value);
         this.facts.get('application').dataset.application = record.applicationStatus || '';
+        this.renderEntryTitles(record);
         this.renderFailure(record);
         this.lateNote.hidden = !record.lateResponse;
         writeText(this.lateNote, '这份返回在请求结束后才收到，原文已保留。');
@@ -378,6 +465,46 @@ export class SchedulerHistoryUI {
             this.restoreResponsePosition(position);
         }
         writeText(this.responseEmpty, this.emptyResponseText(record));
+    }
+
+    renderEntryTitles(record) {
+        const presentation = entryPresentation(record);
+        const changedRecord = this.entriesRecordId !== record.id;
+        this.entriesRecordId = record.id;
+        writeText(this.entriesHeading, presentation.heading);
+        writeText(this.entriesNote, presentation.note);
+        this.entriesNote.hidden = !presentation.note;
+        this.entriesMissing.hidden = Boolean(presentation.snapshot);
+        this.entriesGrid.hidden = !presentation.snapshot;
+        if (!presentation.snapshot) {
+            writeText(this.entriesMissing, presentation.missing);
+            this.entriesSignature = null;
+            return;
+        }
+        const signature = JSON.stringify(presentation.snapshot);
+        if (signature !== this.entriesSignature) {
+            for (const kind of ['blue', 'green']) {
+                const group = this.entryGroups.get(kind);
+                const groupSignature = JSON.stringify(presentation.snapshot[kind]);
+                if (group.signature === groupSignature) continue;
+                const scrollTop = changedRecord ? 0 : group.list.scrollTop;
+                group.list.replaceChildren(...presentation.snapshot[kind].map(entry => element('li', { class: 'wb-history-entry-item' },
+                    element('strong', { class: 'wb-history-entry-title', text: entry.title || '条目标题未记录' }),
+                    element('small', { class: 'wb-history-entry-book', text: entry.book || '世界书名未记录' }))));
+                group.list.scrollTop = scrollTop;
+                group.signature = groupSignature;
+            }
+            this.entriesSignature = signature;
+        }
+        for (const kind of ['blue', 'green']) {
+            const group = this.entryGroups.get(kind);
+            const count = presentation.snapshot[kind].length;
+            if (changedRecord) group.list.scrollTop = 0;
+            writeText(group.heading, `${kind === 'blue' ? '蓝灯' : '绿灯'}条目（${count}）`);
+            group.shell.hidden = !count;
+            group.empty.hidden = Boolean(count);
+            writeText(group.empty, emptyEntryText(kind, presentation));
+        }
     }
 
     renderFailure(record) {

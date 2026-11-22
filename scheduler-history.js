@@ -40,6 +40,30 @@ export function historyConnectionInfo(context = {}, config = {}) {
     return { schemeName: '跟随酒馆主连接', model: mainModel };
 }
 
+/** Keep only the names captured for this request, with blue and green kept separate. */
+export function historyEntryGroups(catalog = [], blue = [], green = []) {
+    const byId = new Map(catalog.map(entry => [entry.id, {
+        id: entry.id, book: text(entry.book), title: text(entry.title),
+    }]));
+    const seen = new Set();
+    const group = entries => entries.flatMap(entry => {
+        const id = typeof entry === 'string' ? entry : entry.id;
+        const item = byId.get(id);
+        if (!item || seen.has(id)) return [];
+        seen.add(id);
+        return [{ ...item }];
+    });
+    return { blue: group(blue), green: group(green) };
+}
+
+/** An effective title must belong both to this request's plan and its accepted IDs. */
+export function historyEffectiveEntries(planned, acceptedIds) {
+    if (!planned) return undefined;
+    const accepted = new Set(acceptedIds);
+    const group = entries => entries.filter(entry => accepted.has(entry.id)).map(entry => ({ ...entry }));
+    return { blue: group(planned.blue), green: group(planned.green) };
+}
+
 export function historyAbortError(message, code = 'ECHO_CONTEXT_CHANGED') {
     const error = new Error(text(message) || '辅助请求已取消。');
     error.code = code;

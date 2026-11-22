@@ -220,6 +220,107 @@
     color: var(--wb-success);
 }
 
+#lorebook-director-workbench .wb-history-entries {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-width: 0;
+}
+
+#lorebook-director-workbench .wb-history-entries > h4 {
+    font-size: 0.9em;
+    font-weight: 600;
+    line-height: 1.5;
+}
+
+#lorebook-director-workbench .wb-history-entries > .wb-help {
+    margin: 0;
+    font-size: 0.8em;
+    line-height: 1.7;
+    overflow-wrap: anywhere;
+}
+
+#lorebook-director-workbench .wb-history-entries-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+    gap: 12px;
+    min-width: 0;
+}
+
+#lorebook-director-workbench .wb-history-entry-group {
+    --wb-history-entry-color: var(--wb-success);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-width: 0;
+    min-height: 0;
+    padding: 12px;
+    border: 1px solid color-mix(in srgb, var(--wb-border) 75%, var(--wb-history-entry-color));
+    border-inline-start: 3px solid color-mix(in srgb, var(--wb-border) 35%, var(--wb-history-entry-color));
+    border-radius: var(--wb-radius-small);
+    background: color-mix(in srgb, var(--wb-surface) 97%, var(--wb-history-entry-color));
+}
+
+#lorebook-director-workbench .wb-history-entry-group[data-kind="blue"] {
+    --wb-history-entry-color: var(--wb-constant, var(--wb-accent));
+}
+
+#lorebook-director-workbench .wb-history-entry-group h5 {
+    margin: 0;
+    color: var(--wb-text);
+    font-size: 0.86em;
+    font-weight: 600;
+    line-height: 1.5;
+}
+
+#lorebook-director-workbench .wb-history-entry-scroll {
+    flex: 0 1 auto;
+    max-height: min(30vh, 280px);
+    max-height: min(30dvh, 280px);
+}
+
+#lorebook-director-workbench .wb-history-entry-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-width: 0;
+    min-height: 0;
+    margin: 0;
+    padding: 0 2px;
+    list-style: none;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+}
+
+#lorebook-director-workbench .wb-history-entry-item {
+    display: flex;
+    flex: 0 0 auto;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+}
+
+#lorebook-director-workbench .wb-history-entry-title {
+    color: var(--wb-text);
+    font-size: 0.86em;
+    font-weight: 600;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+#lorebook-director-workbench .wb-history-entry-book,
+#lorebook-director-workbench .wb-history-entry-empty {
+    min-width: 0;
+    margin: 0;
+    color: var(--wb-muted);
+    font-size: 0.74em;
+    line-height: 1.6;
+    overflow-wrap: anywhere;
+}
+
 #lorebook-director-workbench .wb-history-failure {
     display: flex;
     flex-direction: column;
@@ -307,6 +408,10 @@
     grid-template-columns: minmax(0, 1fr);
 }
 
+#lorebook-director-workbench[data-compact="true"] .wb-history-entries-grid {
+    grid-template-columns: minmax(0, 1fr);
+}
+
 #lorebook-director-workbench[data-compact="true"] .wb-history-list-panel {
     padding-inline-end: 0;
     border-inline-end: 0;
@@ -326,7 +431,8 @@
 }
 
 @media (max-width: 760px) {
-    #lorebook-director-workbench .wb-history-grid {
+    #lorebook-director-workbench .wb-history-grid,
+    #lorebook-director-workbench .wb-history-entries-grid {
         grid-template-columns: minmax(0, 1fr);
     }
 

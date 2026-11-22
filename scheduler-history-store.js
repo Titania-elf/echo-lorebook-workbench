@@ -12,12 +12,34 @@ const STRING_FIELDS = [
 ];
 const NUMBER_FIELDS = ['startedAt', 'submittedAt', 'responseReceivedAt', 'finishedAt', 'durationMs'];
 const COUNT_FIELDS = ['blueAvailable', 'fixedGreen', 'greenCandidates', 'selected', 'included'];
+const ENTRY_GROUP_FIELDS = ['plannedEntries', 'effectiveEntries'];
 const record = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const uniqueId = () => globalThis.crypto?.randomUUID?.()
     || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
 const byNewest = (left, right) => right.startedAt - left.startedAt || right.id.localeCompare(left.id);
 const unfinished = value => value.requestStatus === 'pending'
     || value.applicationStatus === 'pending' || value.applicationStatus === 'waiting';
+
+/** Only title metadata survives; body text and other entry fields are never copied. */
+function entryGroups(value) {
+    if (!record(value) || !Array.isArray(value.blue) || !Array.isArray(value.green)) return null;
+    const seen = new Set();
+    const cards = values => values.flatMap(card => {
+        if (!record(card) || typeof card.id !== 'string' || !card.id.trim() || seen.has(card.id)) return [];
+        seen.add(card.id);
+        return [{
+            id: card.id,
+            book: typeof card.book === 'string' ? card.book : '',
+            title: typeof card.title === 'string' ? card.title : '',
+        }];
+    });
+    return { blue: cards(value.blue), green: cards(value.green) };
+}
+
+const cloneEntryGroups = value => ({
+    blue: value.blue.map(card => ({ ...card })),
+    green: value.green.map(card => ({ ...card })),
+});
 
 /** Only display data is accepted; request payloads, headers and credentials never enter this store. */
 function fields(value) {
@@ -42,6 +64,10 @@ function fields(value) {
             const count = value.counts[key];
             if (typeof count === 'number' && Number.isFinite(count) && count >= 0) result.counts[key] = count;
         }
+    }
+    for (const key of ENTRY_GROUP_FIELDS) {
+        const groups = entryGroups(value[key]);
+        if (groups) result[key] = groups;
     }
     return result;
 }
@@ -91,6 +117,9 @@ export class SchedulerHistoryStore {
         return [...this._records.values()].sort(byNewest).map(value => {
             const { _ownerSession, _revision, _sealed, ...copy } = value;
             if (copy.counts) copy.counts = { ...copy.counts };
+            for (const key of ENTRY_GROUP_FIELDS) {
+                if (copy[key]) copy[key] = cloneEntryGroups(copy[key]);
+            }
             if (this._unconfirmed.has(copy.id)) copy.recoveryUnconfirmed = true;
             return copy;
         });
@@ -151,6 +180,7 @@ export class SchedulerHistoryStore {
         const id = uniqueId();
         const now = Date.now();
         const initial = fields(metadata);
+        delete initial.effectiveEntries;
         for (const key of ['submittedAt', 'responseReceivedAt', 'finishedAt', 'durationMs', 'durationUnknown', 'recovered']) {
             delete initial[key];
         }
@@ -184,6 +214,8 @@ export class SchedulerHistoryStore {
                 delete update.errorCode;
                 delete update.applicationReason;
                 delete update.counts;
+                delete update.plannedEntries;
+                delete update.effectiveEntries;
                 if (update.applicationStatus && update.applicationStatus !== 'unused') delete update.applicationStatus;
                 if (update.rawResponse && update.rawResponse !== previous.rawResponse) update.lateResponse = true;
             } else if (['valid', 'invalid'].includes(previous.validationStatus)
@@ -191,6 +223,9 @@ export class SchedulerHistoryStore {
                 delete update.validationStatus;
             }
         }
+        if ((update.requestStatus ?? previous.requestStatus) !== 'returned'
+            || (update.validationStatus ?? previous.validationStatus) !== 'valid'
+            || (update.applicationStatus ?? previous.applicationStatus) !== 'applied') delete update.effectiveEntries;
         if (update.rawResponse === '' && previous.rawResponse) delete update.rawResponse;
         if (update.counts) update.counts = { ...previous.counts, ...update.counts };
         this._records.set(id, { ...previous, ...update, _revision: previous._revision + 1 });
@@ -211,6 +246,8 @@ export class SchedulerHistoryStore {
         const status = update.requestStatus && update.requestStatus !== 'pending'
             ? update.requestStatus : previous.requestStatus !== 'pending'
                 ? previous.requestStatus : update.error ? 'failed' : 'returned';
+        if (status !== 'returned' || (update.validationStatus ?? previous.validationStatus) !== 'valid'
+            || (update.applicationStatus ?? previous.applicationStatus) !== 'applied') delete update.effectiveEntries;
         const finishedAt = update.finishedAt ?? Date.now();
         const next = {
             ...previous, ...update,
@@ -222,6 +259,7 @@ export class SchedulerHistoryStore {
         if (next.counts) next.counts = { ...previous.counts, ...next.counts };
         if (status !== 'returned' || next.validationStatus === 'invalid') {
             next.applicationStatus = 'unused';
+            delete next.effectiveEntries;
             if (next.validationStatus === 'pending') next.validationStatus = 'not-run';
         }
         if (next.durationUnknown) delete next.durationMs;
