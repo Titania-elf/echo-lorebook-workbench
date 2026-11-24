@@ -1,6 +1,7 @@
 import { element, button } from './workbench-utils.js';
 import { scrollRegion } from './workbench-scroll.js';
 import { historyChatInfo } from './scheduler-history.js';
+import { replyPlanPresentation, replyPlanFields } from './scheduler-report.js';
 
 const REQUEST_STATES = {
     pending: { label: '进行中', tone: 'active' },
@@ -10,11 +11,11 @@ const REQUEST_STATES = {
     cancelled: { label: '取消', tone: 'muted' },
 };
 const APPLICATION_STATES = {
-    pending: '尚未确定',
-    preview: '手动试选，不用于正文注入',
+    pending: '本轮采用尚未确定',
+    preview: '手动试运行，不用于正文注入',
     waiting: '等待正文构造',
-    applied: '已采用',
-    unused: '本轮未采用',
+    applied: '本轮调度已用于正文构造',
+    unused: '本轮调度未采用',
 };
 const GENERATION_TYPES = {
     normal: '普通回复', regenerate: '重新生成', swipe: '滑动重写', continue: '续写',
@@ -60,7 +61,7 @@ function durationText(record) {
 }
 
 function sourceText(record) {
-    if (record.kind === 'preview') return '手动试选';
+    if (record.kind === 'preview') return '手动试运行';
     const type = GENERATION_TYPES[record.generationType];
     return type ? `自动调度（${type}）` : '自动调度';
 }
@@ -97,7 +98,7 @@ function entryPresentation(record) {
     if (record.applicationStatus === 'applied' && effective) {
         return {
             snapshot: effective, effective: true, preliminary: false,
-            heading: '本次生效条目', note: '以酒馆构造接纳的结果为依据。',
+            heading: '本次生效条目', note: '以酒馆世界书扫描接纳的条目 ID 为依据，不证明上游正文 API 已接收全部字符；导演方案状态另列。',
         };
     }
     if (!planned) {
@@ -127,8 +128,8 @@ function entryPresentation(record) {
     }
     if (record.kind === 'preview' || record.applicationStatus === 'preview') {
         return {
-            snapshot: planned, preliminary: false, heading: '本次试选条目',
-            note: '仅为手动试选结果，未用于正文注入。',
+            snapshot: planned, preliminary: false, heading: '本次试运行条目',
+            note: '仅为手动导演试运行结果，未用于正文注入。',
         };
     }
     return {
@@ -141,11 +142,11 @@ function entryPresentation(record) {
 
 function emptyEntryText(kind, presentation) {
     const label = kind === 'blue' ? '蓝灯' : '绿灯';
-    if (presentation.effective) return `本次调度没有被酒馆构造接纳的${label}条目。`;
+    if (presentation.effective) return `本次调度没有被酒馆构造接纳的${label}条目。${kind === 'green' ? '导演方案可独立处理，状态另列。' : ''}`;
     if (presentation.preliminary) return kind === 'blue'
         ? '当前记录未包含已准备的蓝灯条目。'
         : '当前记录未包含已准备的固定绿灯；候选绿灯的最终入选情况尚未记录。';
-    return `当时记录的计划中没有${kind === 'green' ? '入选的' : ''}${label}条目。`;
+    return `当时记录的计划中没有${kind === 'green' ? '入选的' : ''}${label}条目。${kind === 'green' ? '无绿灯也可仅生成导演方案，方案状态独立显示。' : ''}`;
 }
 
 /** Reads browser-local history without replacing the response being examined. */
@@ -208,7 +209,7 @@ export class SchedulerHistoryUI {
         });
         this.search = element('input', {
             id: 'wb-history-search', type: 'search', autocomplete: 'off',
-            placeholder: '搜索模型、方案、聊天、条目或错误', 'aria-label': '搜索调度历史',
+            placeholder: '搜索模型、聊天、条目、导演方案或错误', 'aria-label': '搜索调度历史',
         });
         this.search.addEventListener('input', () => {
             this.query = this.search.value.trim().toLocaleLowerCase();
@@ -239,18 +240,30 @@ export class SchedulerHistoryUI {
         });
         this.detailEmpty = element('div', { class: 'wb-empty wb-history-detail-empty' },
             element('strong', { text: '选择一条记录查看详情' }),
-            element('p', { class: 'wb-help', text: '这里会显示请求状态、是否采用和模型返回原文。' }));
+            element('p', { class: 'wb-help', text: '这里会分别显示本轮采用、世界书接纳、隐藏导演方案状态与模型返回原文。' }));
         this.facts = new Map();
         const factNodes = [
             ['chat', '来源聊天'], ['source', '触发方式'], ['scheme', 'API 方案'], ['model', '模型'],
             ['started', '开始时间'], ['submitted', '提交时间'], ['finished', '结束时间'], ['duration', '耗时'],
-            ['request', '接口状态'], ['validation', '返回校验'], ['application', '是否采用'],
+            ['request', '接口状态'], ['validation', '返回校验'], ['application', '本轮采用'],
         ].map(([key, label]) => {
             const value = element('dd');
             this.facts.set(key, value);
             return element('div', { class: `wb-history-fact${key === 'application' ? ' wb-history-application' : ''}` },
                 element('dt', { text: label }), value);
         });
+        this.planStatus = element('span', { class: 'wb-reply-plan-state' });
+        this.planTokens = element('p', { class: 'wb-help' });
+        this.planNote = element('p', { class: 'wb-help' });
+        this.planReason = element('p', { class: 'wb-help wb-reply-plan-reason' });
+        this.planEmpty = element('p', { class: 'wb-help' });
+        this.planBody = element('dl', { class: 'wb-reply-plan-body' });
+        this.planDisclaimer = element('p', { class: 'wb-help', text: '这是当时的拟议走向，不是已发生的场景事实；采用时用于隐藏的深度 0 System 指令，不生成可见聊天消息。依赖条目只是方案的要求，不表示已被构造接纳。' });
+        this.planTokenNote = element('p', { class: 'wb-help', text: 'Token 数包含方案、执行提示、标记与消息开销，仍占正文上下文；预算不足时省略，不截断。' });
+        this.planSection = element('section', { class: 'wb-reply-plan wb-history-plan', 'aria-labelledby': 'wb-history-plan-title' },
+            element('div', { class: 'wb-reply-plan-heading' }, element('h4', { id: 'wb-history-plan-title', text: '导演方案' }), this.planStatus),
+            this.planDisclaimer, this.planTokens, this.planTokenNote,
+            this.planNote, this.planReason, this.planEmpty, this.planBody);
         this.entriesHeading = element('h4');
         this.entriesNote = element('p', { class: 'wb-help' });
         this.entriesMissing = element('p', { class: 'wb-help' });
@@ -286,7 +299,7 @@ export class SchedulerHistoryUI {
         this.responseShell = scrollRegion(this.response, 'wb-history-response-scroll');
         this.detailContent = element('div', { class: 'wb-history-detail-content' },
             element('dl', { class: 'wb-history-facts' }, factNodes),
-            this.entriesSection, this.failure,
+            this.planSection, this.entriesSection, this.failure,
             element('section', { class: 'wb-history-response-section wb-field' },
                 element('label', { htmlFor: this.response.id, text: '模型返回原文' }),
                 this.lateNote, this.responseEmpty, this.responseShell));
@@ -298,7 +311,7 @@ export class SchedulerHistoryUI {
         this.storageNotice = element('section', { class: 'wb-history-storage wb-error', role: 'status', hidden: true },
             element('strong', { text: '历史记录暂未能完整保存在浏览器' }), this.storageText);
         this.viewport = element('div', { class: 'wb-history-page' },
-            element('p', { class: 'wb-help', text: '查看当前浏览器保存的自动调度与手动试选记录。' }),
+            element('p', { class: 'wb-help', text: '查看当前浏览器保存的自动导演调度与手动试运行记录；世界书接纳与方案注入分别记录。' }),
             this.storageNotice, element('div', { class: 'wb-history-grid' }, listPanel, detailPanel));
         this.view = element('section', { class: 'wb-feature-view wb-history-view', 'data-history-detail': 'false' },
             scrollRegion(this.viewport, 'wb-fill-scroll'));
@@ -312,13 +325,14 @@ export class SchedulerHistoryUI {
         const model = element('span', { class: 'wb-history-record-model' });
         const chat = element('span', { class: 'wb-history-record-chat' });
         const application = element('span', { class: 'wb-history-record-application' });
-        const footer = element('span', { class: 'wb-history-record-footer' }, chat, application);
+        const plan = element('span', { class: 'wb-history-record-plan' });
+        const footer = element('span', { class: 'wb-history-record-footer' }, chat, application, plan);
         const node = button('', {
             class: 'wb-history-record', 'aria-controls': 'wb-history-details',
             onclick: () => this.selectRecord(id),
         });
         node.append(element('span', { class: 'wb-history-record-heading' }, time, state), source, model, footer);
-        return { node, time, state, source, model, chat, application, footer };
+        return { node, time, state, source, model, chat, application, plan, footer };
     }
 
     update({ refilter = false } = {}) {
@@ -330,7 +344,9 @@ export class SchedulerHistoryUI {
             if (!this.query) return true;
             const snapshot = entryPresentation(record).snapshot;
             const titles = ['blue', 'green'].flatMap(kind => (snapshot?.[kind] || []).flatMap(entry => [entry.title, entry.book]));
-            return [record.model, record.schemeName, record.chatName, record.error, record.applicationReason, ...titles]
+            const plan = replyPlanPresentation(record).plan;
+            return [record.model, record.schemeName, record.chatName, record.error, record.applicationReason, record.replyPlanReason,
+                plan?.direction, plan?.ending, ...(plan?.beats || []), ...(plan?.constraints || []), ...(plan?.requiredEntryIds || []), ...titles]
                 .map(text).join('\n').toLocaleLowerCase().includes(this.query);
         });
         let selected = records.find(record => record.id === this.selectedId);
@@ -368,11 +384,15 @@ export class SchedulerHistoryUI {
             writeText(row.model, text(record.model) || '模型尚未确定');
             writeText(row.chat, text(record.chatName) || '未命名聊天');
             row.chat.hidden = this.scope !== 'all';
-            const application = { applied: '已采用', unused: '未采用', waiting: '等待构造' }[record.applicationStatus];
+            const application = { applied: '本轮构造已采用', unused: '本轮未采用', waiting: '等待正文构造' }[record.applicationStatus];
             writeText(row.application, application || '');
             row.application.dataset.application = record.applicationStatus || '';
             row.application.hidden = !application;
-            row.footer.hidden = row.chat.hidden && row.application.hidden;
+            const plan = replyPlanPresentation(record, { history: true });
+            writeText(row.plan, `导演：${plan.label}`);
+            row.plan.dataset.tone = plan.tone;
+            row.plan.hidden = !record.replyPlanStatus && !plan.plan;
+            row.footer.hidden = row.chat.hidden && row.application.hidden && row.plan.hidden;
             const selected = record.id === this.selectedId;
             row.node.dataset.selected = String(selected);
             row.node.setAttribute('aria-pressed', String(selected));
@@ -395,7 +415,7 @@ export class SchedulerHistoryUI {
 
     renderEmpty(records, current) {
         let title = '暂无历史记录';
-        let description = '自动调度或手动试选后，会在这里留下记录。';
+        let description = '自动导演调度或手动试运行后，会在这里留下记录；没有托管条目也可只运行导演方案。';
         if (this.loading && !records.length) {
             title = '正在读取历史记录…';
             description = '正在加载当前浏览器中的记录。';
@@ -449,6 +469,7 @@ export class SchedulerHistoryUI {
         };
         for (const [key, value] of Object.entries(facts)) writeText(this.facts.get(key), value);
         this.facts.get('application').dataset.application = record.applicationStatus || '';
+        this.renderReplyPlan(record);
         this.renderEntryTitles(record);
         this.renderFailure(record);
         this.lateNote.hidden = !record.lateResponse;
@@ -465,6 +486,44 @@ export class SchedulerHistoryUI {
             this.restoreResponsePosition(position);
         }
         writeText(this.responseEmpty, this.emptyResponseText(record));
+    }
+
+    renderReplyPlan(record) {
+        const presentation = replyPlanPresentation(record, { history: true });
+        writeText(this.planStatus, presentation.label);
+        this.planStatus.dataset.tone = presentation.tone;
+        const hasTokens = typeof record.replyPlanTokens === 'number' && Number.isFinite(record.replyPlanTokens) && record.replyPlanTokens >= 0;
+        writeText(this.planTokens, presentation.tokens);
+        this.planTokens.hidden = !hasTokens && !presentation.plan;
+        this.planTokenNote.hidden = this.planTokens.hidden;
+        this.planDisclaimer.hidden = !presentation.plan;
+        writeText(this.planNote, presentation.note);
+        this.planNote.hidden = !record.replyPlanStatus && !presentation.plan;
+        writeText(this.planReason, presentation.reason);
+        this.planReason.hidden = !presentation.reason;
+        writeText(this.planEmpty, presentation.empty);
+        this.planEmpty.hidden = Boolean(presentation.plan);
+        this.planBody.hidden = !presentation.plan;
+        const entries = ['plannedEntries', 'effectiveEntries'].flatMap(key => {
+            const snapshot = entrySnapshot(record[key]);
+            return [...(snapshot?.blue || []), ...(snapshot?.green || [])];
+        });
+        const byId = new Map(entries.map(entry => [entry.id, entry]));
+        const fields = replyPlanFields(presentation.plan, id => {
+            const entry = byId.get(id);
+            return entry ? `${entry.title || '条目标题未记录'}（${entry.book || '世界书名未记录'}）` : id;
+        });
+        const signature = JSON.stringify(fields);
+        if (signature !== this.planSignature) {
+            this.planBody.replaceChildren(...fields.map(field => {
+                const content = field.values?.length
+                    ? element(field.ordered ? 'ol' : 'ul', { class: 'wb-reply-plan-list' }, field.values.map(value => element('li', { text: value })))
+                    : field.value || field.empty;
+                return element('div', { class: 'wb-reply-plan-field', 'data-field': field.key },
+                    element('dt', { text: field.label }), element('dd', {}, content));
+            }));
+            this.planSignature = signature;
+        }
     }
 
     renderEntryTitles(record) {

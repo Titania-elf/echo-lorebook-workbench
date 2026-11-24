@@ -121,7 +121,7 @@ export class APISettingsUI {
         this.actions = element('div', { class: 'wb-action-row' }, this.state,
             element('div', { class: 'wb-action-buttons' }, this.discardButton, this.save));
         const form = element('form', { class: 'wb-api-settings' },
-            element('p', { class: 'wb-help', text: '为资料选择和目录概括保存独立 API 方案，或直接跟随酒馆主连接。' }),
+            element('p', { class: 'wb-help', text: '为剧情导演、世界书资料统筹和目录概括保存独立 API 方案，或直接跟随酒馆主连接。' }),
             element('div', { class: 'wb-api-toolbar' }, this.field(this.profile, '当前 API 方案'),
                 element('div', { class: 'wb-api-scheme-actions' }, this.addButton, this.deleteButton)),
             this.schemeGroup, this.mainSummary,

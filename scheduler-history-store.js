@@ -1,4 +1,5 @@
 import { accountsEnabled, currentUser, getCurrentUserHandle } from '../../../user.js';
+import { replyPlanSnapshot } from './scheduler-report.js';
 
 const RECORD_STORE = 'records';
 const RECORD_LIMIT = 100;
@@ -6,11 +7,14 @@ const SERVER_ROOT = new URL('../../../../', import.meta.url).href;
 const REQUEST_STATUSES = new Set(['pending', 'returned', 'failed', 'timeout', 'cancelled']);
 const VALIDATION_STATUSES = new Set(['pending', 'valid', 'invalid', 'not-run']);
 const APPLICATION_STATUSES = new Set(['pending', 'preview', 'waiting', 'applied', 'unused']);
+const REPLY_PLAN_STATUSES = new Set(['waiting', 'preview', 'injected', 'omitted', 'cancelled']);
+const FINAL_REPLY_PLAN_STATUSES = new Set(['omitted', 'cancelled']);
+const REPLY_PLAN_FIELDS = ['replyPlan', 'replyPlanStatus', 'replyPlanReason', 'replyPlanTokens'];
 const STRING_FIELDS = [
     'chatKey', 'chatName', 'generationType', 'schemeName', 'model', 'rawResponse',
-    'error', 'errorStage', 'errorCode', 'applicationReason',
+    'error', 'errorStage', 'errorCode', 'applicationReason', 'replyPlanReason',
 ];
-const NUMBER_FIELDS = ['startedAt', 'submittedAt', 'responseReceivedAt', 'finishedAt', 'durationMs'];
+const NUMBER_FIELDS = ['startedAt', 'submittedAt', 'responseReceivedAt', 'finishedAt', 'durationMs', 'replyPlanTokens'];
 const COUNT_FIELDS = ['blueAvailable', 'fixedGreen', 'greenCandidates', 'selected', 'included'];
 const ENTRY_GROUP_FIELDS = ['plannedEntries', 'effectiveEntries'];
 const record = value => value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -18,7 +22,8 @@ const uniqueId = () => globalThis.crypto?.randomUUID?.()
     || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
 const byNewest = (left, right) => right.startedAt - left.startedAt || right.id.localeCompare(left.id);
 const unfinished = value => value.requestStatus === 'pending'
-    || value.applicationStatus === 'pending' || value.applicationStatus === 'waiting';
+    || value.applicationStatus === 'pending' || value.applicationStatus === 'waiting'
+    || value.replyPlanStatus === 'waiting';
 
 /** Only title metadata survives; body text and other entry fields are never copied. */
 function entryGroups(value) {
@@ -55,6 +60,9 @@ function fields(value) {
     if (REQUEST_STATUSES.has(value.requestStatus)) result.requestStatus = value.requestStatus;
     if (VALIDATION_STATUSES.has(value.validationStatus)) result.validationStatus = value.validationStatus;
     if (APPLICATION_STATUSES.has(value.applicationStatus)) result.applicationStatus = value.applicationStatus;
+    if (REPLY_PLAN_STATUSES.has(value.replyPlanStatus)) result.replyPlanStatus = value.replyPlanStatus;
+    const plan = replyPlanSnapshot(value.replyPlan);
+    if (plan) result.replyPlan = plan;
     for (const key of ['lateResponse', 'durationUnknown', 'recovered']) {
         if (typeof value[key] === 'boolean') result[key] = value[key];
     }
@@ -70,6 +78,44 @@ function fields(value) {
         if (groups) result[key] = groups;
     }
     return result;
+}
+
+/** A final local plan decision cannot be rewritten by a late response or later cancellation. */
+function protectReplyPlan(previous, update) {
+    const discard = () => { for (const key of REPLY_PLAN_FIELDS) delete update[key]; };
+    const delivered = ['preview', 'injected'].includes(previous.replyPlanStatus);
+    const applicationFinal = ['preview', 'applied', 'unused'].includes(previous.applicationStatus);
+    if (FINAL_REPLY_PLAN_STATUSES.has(previous.replyPlanStatus) || (delivered && applicationFinal)
+        || (previous._sealed && previous.requestStatus !== 'returned')) {
+        discard();
+        return;
+    }
+    if (delivered) {
+        // A staged injection may still be omitted by final prompt construction, never replaced or revived.
+        delete update.replyPlan;
+        delete update.replyPlanTokens;
+        if (update.replyPlanStatus && ![previous.replyPlanStatus, 'omitted', 'cancelled'].includes(update.replyPlanStatus)) discard();
+    }
+    if (update.lateResponse === true) discard();
+    const request = update.requestStatus ?? previous.requestStatus;
+    const validation = update.validationStatus ?? previous.validationStatus;
+    const application = update.applicationStatus ?? previous.applicationStatus;
+    const applicationPending = ['pending', 'waiting'].includes(previous.applicationStatus);
+    const requestEnded = ['failed', 'timeout', 'cancelled'].includes(request) || validation === 'invalid';
+    const recoveringPlan = update.recovered === true
+        && (previous.replyPlanStatus === 'waiting' || (delivered && applicationPending));
+    const canCancel = requestEnded || recoveringPlan
+        || (applicationPending && !['applied', 'preview'].includes(application));
+    if (update.replyPlanStatus === 'cancelled' && !canCancel) discard();
+    if (['preview', 'injected'].includes(update.replyPlanStatus)
+        && (request !== 'returned' || validation !== 'valid')) discard();
+    const interrupted = requestEnded || recoveringPlan || (applicationPending && application === 'unused');
+    const status = update.replyPlanStatus ?? previous.replyPlanStatus;
+    if (interrupted && (status === 'waiting' || (applicationPending && ['preview', 'injected'].includes(status)))) {
+        update.replyPlanStatus = 'cancelled';
+        update.replyPlanReason = update.replyPlanReason || update.applicationReason || update.error
+            || '本轮未完成，待用导演方案已清理。';
+    }
 }
 
 function storedRecord(value) {
@@ -117,6 +163,7 @@ export class SchedulerHistoryStore {
         return [...this._records.values()].sort(byNewest).map(value => {
             const { _ownerSession, _revision, _sealed, ...copy } = value;
             if (copy.counts) copy.counts = { ...copy.counts };
+            if (copy.replyPlan) copy.replyPlan = replyPlanSnapshot(copy.replyPlan);
             for (const key of ENTRY_GROUP_FIELDS) {
                 if (copy[key]) copy[key] = cloneEntryGroups(copy[key]);
             }
@@ -181,6 +228,7 @@ export class SchedulerHistoryStore {
         const now = Date.now();
         const initial = fields(metadata);
         delete initial.effectiveEntries;
+        for (const key of REPLY_PLAN_FIELDS) delete initial[key];
         for (const key of ['submittedAt', 'responseReceivedAt', 'finishedAt', 'durationMs', 'durationUnknown', 'recovered']) {
             delete initial[key];
         }
@@ -191,6 +239,7 @@ export class SchedulerHistoryStore {
             chatKey: initial.chatKey || 'unknown',
             rawResponse: '', error: '', errorStage: '', errorCode: '', applicationReason: '', lateResponse: false,
             requestStatus: 'pending', validationStatus: 'pending', applicationStatus: 'pending',
+            replyPlanStatus: 'waiting', replyPlanReason: '',
             _ownerSession: this._sessionId, _revision: 1, _sealed: false,
         });
         this._pruneMemory();
@@ -222,7 +271,10 @@ export class SchedulerHistoryStore {
                 && update.validationStatus !== previous.validationStatus) {
                 delete update.validationStatus;
             }
+            if (['preview', 'applied', 'unused'].includes(previous.applicationStatus)
+                && update.applicationStatus !== previous.applicationStatus) delete update.applicationStatus;
         }
+        protectReplyPlan(previous, update);
         if ((update.requestStatus ?? previous.requestStatus) !== 'returned'
             || (update.validationStatus ?? previous.validationStatus) !== 'valid'
             || (update.applicationStatus ?? previous.applicationStatus) !== 'applied') delete update.effectiveEntries;
@@ -246,6 +298,8 @@ export class SchedulerHistoryStore {
         const status = update.requestStatus && update.requestStatus !== 'pending'
             ? update.requestStatus : previous.requestStatus !== 'pending'
                 ? previous.requestStatus : update.error ? 'failed' : 'returned';
+        update.requestStatus = status;
+        protectReplyPlan(previous, update);
         if (status !== 'returned' || (update.validationStatus ?? previous.validationStatus) !== 'valid'
             || (update.applicationStatus ?? previous.applicationStatus) !== 'applied') delete update.effectiveEntries;
         const finishedAt = update.finishedAt ?? Date.now();
@@ -281,10 +335,17 @@ export class SchedulerHistoryStore {
                 durationUnknown: !closedAt, recovered: true,
             });
         } else {
+            const applicationPending = ['pending', 'waiting'].includes(value.applicationStatus);
+            const planPending = value.replyPlanStatus === 'waiting'
+                || (applicationPending && ['preview', 'injected'].includes(value.replyPlanStatus));
             this.patch(value.id, {
-                applicationStatus: 'unused', applicationReason: reason, recovered: true,
-                ...(value.validationStatus === 'pending' ? { validationStatus: 'not-run' } : {}),
-                ...(value.error ? {} : { error: reason, errorStage: 'recovery', errorCode: 'page-interrupted' }),
+                recovered: true,
+                ...(applicationPending ? {
+                    applicationStatus: 'unused', applicationReason: reason,
+                    ...(value.validationStatus === 'pending' ? { validationStatus: 'not-run' } : {}),
+                    ...(value.error ? {} : { error: reason, errorStage: 'recovery', errorCode: 'page-interrupted' }),
+                } : {}),
+                ...(planPending ? { replyPlanStatus: 'cancelled', replyPlanReason: reason } : {}),
             });
         }
     }

@@ -22,7 +22,16 @@ globalThis.lorebookDirectorInterceptor = (...args) => director.intercept(...args
 jQuery(async () => {
     const context = getContext();
     void history.initialize();
-    context.extensionSettings[MODULE] = settingsWithDefaults(context.extensionSettings[MODULE]);
+    const storedConfig = context.extensionSettings[MODULE];
+    const normalizedConfig = settingsWithDefaults(storedConfig);
+    const storedSelector = storedConfig?.promptTemplates?.selector;
+    const selectorMigrated = Array.isArray(storedSelector)
+        && !storedSelector.some(entry => entry?.id === 'selector-protocol')
+        && normalizedConfig.promptTemplates.selector.some(entry => entry.id === 'selector-protocol');
+    const promptRolesMigrated = Boolean(storedConfig && storedConfig.promptRoleVersion !== normalizedConfig.promptRoleVersion);
+    context.extensionSettings[MODULE] = normalizedConfig;
+    // Persist recognized template/role upgrades without backfilling user-deleted entries.
+    if (selectorMigrated || promptRolesMigrated) context.saveSettingsDebounced();
     const disabled = context.extensionSettings.disabledExtensions;
     if (Array.isArray(disabled)) {
         const aliases = new Set([MODULE, EXTENSION_NAME, EXTENSION_FOLDER,

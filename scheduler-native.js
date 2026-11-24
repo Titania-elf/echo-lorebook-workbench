@@ -37,7 +37,7 @@ export class SchedulerScanGate {
         this.snapshot = snapshot;
         this.catalog = new Map(catalog.map(item => [item.id, item.entry]));
         this.prepared = prepared;
-        this.nonce = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+        this.nonce ||= globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
         this.sources = [];
         this.scanEntries = null;
         this.activeMap = null;
@@ -78,7 +78,8 @@ export class SchedulerScanGate {
     }
 
     matches(entries) {
-        return entries === this.scanEntries || entries.some(entry => this.owns(entry, 'mask'));
+        return entries === this.scanEntries || entries.some(entry => this.owns(entry, 'mask'))
+            || (this.staged && !this.catalog.size && !this.scanEntries && !this.cancelled);
     }
 
     restoreFields(entry, original, parsed = false) {

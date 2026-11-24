@@ -1,8 +1,9 @@
 import {
     MODULE, EXTENSION_NAME, EXTENSION_FOLDER, settingsWithDefaults, makeCatalog, digest, entryId, historyChain, previousSnapshot,
     selectorPayload, validateSelection, allocateSelection,
-    recordSnapshot, parseJsonObject, recentContext,
+    recordSnapshot, parseJsonObject, recentContext, latestUserContext,
 } from './core.js';
+import { buildReplyPlanPrompt, missingReplyPlanEntries } from './reply-plan.js';
 import { SchedulerScanGate, verifyNativeSources } from './scheduler-native.js';
 import { buildPromptMessages } from './prompt-templates.js';
 import {
@@ -27,7 +28,7 @@ export class LorebookDirector {
         this.activeBooks = [];
         this.catalogError = '';
         this.report = null;
-        this.status = '尚未运行。选择托管书和 API 后，可以试选查看蓝灯常驻与绿灯筛选结果。';
+        this.status = '尚未运行。配置 API 后可以试运行导演方案；已挂载并托管的世界书提供蓝灯约束与绿灯参考。';
         this.operation = null;
         this.gate = null;
         this.revision = 0;
@@ -81,13 +82,14 @@ export class LorebookDirector {
             const id = this.history.begin({
                 ...op.historyChat, ...historyConnectionInfo(context, op.config),
                 kind: op.kind, generationType: type, startedAt: Date.now(), counts, plannedEntries,
+                replyPlanStatus: 'waiting', replyPlanReason: '',
             });
             if (!id) return;
             op.historyId = id;
             op.historyState = {
                 requestStatus: 'pending', validationStatus: 'pending', applicationStatus: 'pending',
                 sealed: false, responseSeen: false, receivedAt: null, hasBody: false, stage: 'prompt', counts: { ...counts },
-                plannedEntries,
+                plannedEntries, replyPlanStatus: 'waiting', replyPlanReason: '',
             };
             op.historyAbort = () => this.failHistory(op, op.controller.signal.reason
                 || historyAbortError('辅助请求已取消。', 'ECHO_USER_CANCELLED'));
@@ -100,7 +102,7 @@ export class LorebookDirector {
     patchHistory(turn, fields) {
         if (!turn?.historyId || !turn.historyState) return;
         const state = turn.historyState;
-        for (const key of ['requestStatus', 'validationStatus', 'applicationStatus', 'lateResponse']) {
+        for (const key of ['requestStatus', 'validationStatus', 'applicationStatus', 'lateResponse', 'replyPlanStatus', 'replyPlanReason', 'replyPlanTokens']) {
             if (fields[key] !== undefined) state[key] = fields[key];
         }
         if (fields.counts) state.counts = { ...state.counts, ...fields.counts };
@@ -113,7 +115,7 @@ export class LorebookDirector {
         if (!turn?.historyId || !turn.historyState || turn.historyState.sealed) return;
         const state = turn.historyState;
         state.sealed = true;
-        for (const key of ['requestStatus', 'validationStatus', 'applicationStatus']) {
+        for (const key of ['requestStatus', 'validationStatus', 'applicationStatus', 'replyPlanStatus', 'replyPlanReason', 'replyPlanTokens']) {
             if (fields[key] !== undefined) state[key] = fields[key];
         }
         if (fields.counts) state.counts = { ...state.counts, ...fields.counts };
@@ -150,6 +152,7 @@ export class LorebookDirector {
         if (state.sealed) {
             if (state.requestStatus === 'returned') this.patchHistory(turn, {
                 applicationStatus: 'unused', applicationReason: failure.error,
+                replyPlanStatus: HISTORY_CANCEL_CODES.has(errorCode) ? 'cancelled' : 'omitted', replyPlanReason: failure.error,
                 error: failure.error, errorCode, errorStage: 'application',
             });
             return;
@@ -161,6 +164,7 @@ export class LorebookDirector {
             requestStatus,
             validationStatus: returned && stage === 'validation' ? 'invalid' : 'not-run',
             applicationStatus: 'unused', applicationReason: failure.error,
+            replyPlanStatus: HISTORY_CANCEL_CODES.has(errorCode) ? 'cancelled' : 'omitted', replyPlanReason: failure.error,
             error: failure.error, errorCode, errorStage: returned && stage !== 'validation' ? 'application' : stage,
             finishedAt: returned && state.receivedAt !== null ? state.receivedAt : Date.now(),
         });
@@ -208,8 +212,11 @@ export class LorebookDirector {
         this.operation?.controller.abort(reasonError);
         this.operation = null;
         for (const gate of this.scanGates) {
-            if (gate !== committed) gate.cancel();
+            if (gate === committed) continue;
+            this.native.clearSchedulerReplyPlan(gate);
+            gate.cancel();
         }
+        if (!committed) this.native.clearSchedulerReplyPlan();
         this.gate = committed;
         if (pending && warning) this.fallback(pending, reasonError);
         if (clear) { this.catalog = []; this.activeBooks = []; this.catalogError = ''; this.report = null; }
@@ -245,9 +252,11 @@ export class LorebookDirector {
             this.notify();
         }
         this.generationSignal = null;
+        this.native.clearSchedulerReplyPlan();
         for (const gate of this.scanGates) {
-            // A staged source may already have been cloned by an unfinished native scan.
-            if (!gate.staged || (gate.cancelled && gate.committed && gate.scanEntries)) {
+            // A plan-only turn never masks sources and needs no native scan recovery.
+            // A staged managed source may already have been cloned by an unfinished scan.
+            if (!gate.catalog.size || !gate.staged || (gate.cancelled && gate.committed && gate.scanEntries)) {
                 gate.finish();
                 this.scanGates.delete(gate);
             }
@@ -255,13 +264,15 @@ export class LorebookDirector {
     }
 
     fallback(turn, reason) {
+        this.native.clearSchedulerReplyPlan(turn);
         this.failHistory(turn, reason);
         const message = typeof reason === 'string' ? reason : reason?.message || '本轮调度未完成。';
         if (turn.epoch !== this.generationEpoch || turn.chatKey !== this.chatKey() || turn.id !== this.latestWork) return;
         const info = turn.result || turn.info || {};
         this.report = {
             ...info, mode: 'fallback', blue: [], selected: [], skipped: [], actual: [],
-            construction: 'native', error: message, at: Date.now(), chatKey: turn.chatKey,
+            construction: 'native', replyPlanStatus: 'omitted', replyPlanReason: message,
+            error: message, at: Date.now(), chatKey: turn.chatKey,
         };
         this.status = `本轮已跳过调度，继续原生生成：${message}`;
         if (!turn.warned) {
@@ -272,13 +283,15 @@ export class LorebookDirector {
     }
 
     cancelReport(turn, reason, reasonCode = 'ECHO_USER_CANCELLED') {
+        this.native.clearSchedulerReplyPlan(turn);
         const error = reason instanceof Error ? reason : historyAbortError(reason, reasonCode);
         this.failHistory(turn, error);
         const message = error.message;
         if (turn.id !== this.latestWork || turn.epoch !== this.generationEpoch || turn.chatKey !== this.chatKey()) return;
         this.report = {
             ...(turn.result || turn.info || {}), mode: 'cancelled', blue: [], selected: [], skipped: [], actual: [],
-            construction: 'cancelled', error: message, at: Date.now(), chatKey: turn.chatKey,
+            construction: 'cancelled', replyPlanStatus: 'cancelled', replyPlanReason: message,
+            error: message, at: Date.now(), chatKey: turn.chatKey,
         };
         this.status = message;
     }
@@ -322,8 +335,9 @@ export class LorebookDirector {
             kind, revision: this.revision, signature: this.signature(context), chatKey: this.chatKey(context),
             controller: new AbortController(), config: this.config, epoch: this.generationEpoch,
             id: ++this.workSerial,
+            nonce: globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`,
             info: {
-                historyCount: 0, blueAvailable: 0, greenAvailable: 0, greenCandidates: 0,
+                historyCount: 0, latestUserRead: false, blueAvailable: 0, greenAvailable: 0, greenCandidates: 0,
                 apiAttempted: false, apiSubmitted: false, apiDispatched: false, apiSucceeded: false, apiSkipReason: '',
                 catalogLoaded: false,
             },
@@ -420,7 +434,9 @@ export class LorebookDirector {
     async select(chat, op, type = 'normal') {
         op.info.historyCount = recentContext(chat, op.config.recentMessages).length;
         op.info.historyRequested = op.config.recentMessages;
-        this.status = `正在读取最近 ${op.info.historyCount} 层 AI 消息全文和已保存的世界书…`;
+        op.info.latestUserRead = Boolean(latestUserContext(chat)?.text.trim());
+        if (op.kind === 'generation') this.native.assertSchedulerReplyPlanSlot(type);
+        this.status = `正在读取最近 ${op.info.historyCount} 层 AI 回复全文、最新用户输入和已保存的世界书…`;
         this.notify();
         const snapshot = await this.waitFor(this.native.schedulerSnapshot(op.config.books, { signal: op.controller.signal }), op);
         this.assertCurrent(op);
@@ -453,24 +469,33 @@ export class LorebookDirector {
         if (op.kind === 'generation') {
             this.native.assertSchedulerSlots([...blue, ...pins.selected], type);
         }
-        let historyCatalog;
-        if (modelCatalog.length && pins.selected.length < op.config.maxEntries && pins.tokens < op.config.tokenBudget) {
-            historyCatalog = catalog.map(item => ({
-                id: item.id, book: String(item.entry.world), title: item.title,
-            }));
+        // Planning remains necessary with no candidate green entries or no remaining budget.
+        const historyCatalog = catalog.map(item => ({
+            id: item.id, book: String(item.entry.world), title: item.title,
+        }));
+        {
             this.beginHistory(op, context, type, {
                 blueAvailable: blue.length, fixedGreen: pins.selected.length, greenCandidates: modelCatalog.length,
             }, historyEntryGroups(historyCatalog, blue, pins.selected));
-            const input = selectorPayload(catalog, chat, previous, overrides, op.config, pins.selected);
-            input.remainingGreenTokenBudget = op.config.tokenBudget - pins.tokens;
+            const input = selectorPayload(catalog, chat, previous, overrides, op.config, pins.selected, {
+                generationType: type, characterContext: this.native.schedulerCharacterContext(),
+            });
+            const guidanceCount = await countTokens(buildReplyPlanPrompt({
+                direction: '', beats: [], constraints: [], ending: '',
+            }, op.nonce));
+            if (!Number.isFinite(guidanceCount) || guidanceCount < 0) throw new Error('无法估算导演固定执行指导的 Token 开销。');
+            input.replyPlanContentTokenBudget = Math.max(0, op.config.replyPlanTokenBudget - Math.ceil(guidanceCount) - 20);
+            input.remainingGreenTokenBudget = Math.max(0, op.config.tokenBudget - pins.tokens);
             const messages = buildPromptMessages('selector', op.config.promptTemplates, { input, context, config: op.config });
             if (op.historyState) op.historyState.stage = 'request';
             op.info.apiAttempted = true;
-            this.status = `正在提交筛选提示词：本轮有 ${blue.length} 条蓝灯、${pins.selected.length} 条固定绿灯和 ${modelCatalog.length} 条候选绿灯。`;
+            this.status = `正在提交导演提示词：构思本轮唯一主方向，并统筹 ${blue.length} 条蓝灯、${pins.selected.length} 条固定绿灯和 ${modelCatalog.length} 条候选绿灯。`;
             this.notify();
             let response;
             try {
-                const pending = this.requestModel(context, op.config, messages, op.controller.signal, 1800, {
+                const responseTokens = Math.min(10000, Math.max(3000,
+                    op.config.replyPlanTokenBudget + op.config.maxEntries * 160 + 600));
+                const pending = this.requestModel(context, op.config, messages, op.controller.signal, responseTokens, {
                     onDispatch: info => {
                         this.assertCurrent(op);
                         op.info.apiSubmitted = true;
@@ -495,20 +520,22 @@ export class LorebookDirector {
             op.info.apiDispatched = true;
             op.info.apiSucceeded = true;
             if (op.historyState) op.historyState.stage = 'validation';
-            try { choice = validateSelection(response, modelCatalog); }
-            catch (error) {
+            try {
+                choice = validateSelection(response, modelCatalog, {
+                    requireReplyPlan: true, fixedEntries: [...blue, ...pins.selected],
+                });
+            } catch (error) {
                 this.failHistory(op, error, 'validation');
                 throw error;
             }
+            op.info.replyPlan = choice.replyPlan;
+            this.patchHistory(op, { replyPlan: choice.replyPlan, replyPlanStatus: 'waiting', replyPlanReason: '' });
             this.completeHistory(op, {
                 requestStatus: 'returned', validationStatus: 'valid',
                 applicationStatus: op.kind === 'generation' ? 'waiting' : 'pending',
                 finishedAt: op.historyState?.receivedAt ?? Date.now(),
             });
             if (op.historyState) op.historyState.stage = 'application';
-        } else {
-            op.info.apiSkipReason = !modelCatalog.length ? '没有可供模型筛选的绿灯'
-                : pins.selected.length >= op.config.maxEntries ? '固定绿灯已用满条目上限' : '固定绿灯已用满 Token 预算';
         }
         const selected = await allocateSelection(choice, catalog, overrides, op.config, countTokens);
         this.assertCurrent(op);
@@ -537,12 +564,27 @@ export class LorebookDirector {
             }
         }
         const included = [...constants, ...selected.selected];
+        const replyPlanPrompt = buildReplyPlanPrompt(choice.replyPlan, op.nonce);
+        const planCount = await countTokens(replyPlanPrompt);
+        if (!Number.isFinite(planCount) || planCount < 0) throw new Error('无法估算导演方案的 Token 数量。');
+        const replyPlanTokens = Math.ceil(planCount) + 4;
+        const missing = missingReplyPlanEntries(choice.replyPlan, included.map(item => item.id));
+        const missingNames = missing.map(id => catalog.find(item => item.id === id)?.title || id);
+        const reasons = [];
+        if (missing.length) reasons.push(`导演方案必需的资料未通过绿灯预算或数量限制：${missingNames.join('、')}。`);
+        if (replyPlanTokens > op.config.replyPlanTokenBudget) reasons.push(`导演方案约 ${replyPlanTokens} tokens，超过独立上限 ${op.config.replyPlanTokenBudget}（不截断方案）。`);
         const result = {
             ...selected, ...op.info, blue: constants,
+            replyPlan: choice.replyPlan, replyPlanTokens,
+            replyPlanStatus: reasons.length ? 'omitted' : op.kind === 'preview' ? 'preview' : 'waiting',
+            replyPlanReason: reasons.join(''),
             blueTokens: constants.reduce((sum, item) => sum + item.tokens, 0),
             beforeCount: included.filter(item => item.position === 'before').length,
             afterCount: included.filter(item => item.position === 'after').length,
         };
+        this.patchHistory(op, {
+            replyPlan: result.replyPlan, replyPlanTokens, replyPlanStatus: result.replyPlanStatus, replyPlanReason: result.replyPlanReason,
+        });
         const byId = new Map(catalog.map(item => [item.id, item]));
         for (const item of included) item.mappedPosition = ![0, 1].includes(byId.get(item.id).entry.position);
         if (op.kind === 'generation') this.native.assertSchedulerSlots(included, type);
@@ -558,7 +600,65 @@ export class LorebookDirector {
         }) : [];
         this.assertCurrent(op);
         op.info = result;
-        return { result, snapshot, catalog, prepared };
+        return { result, snapshot, catalog, prepared, replyPlanPrompt };
+    }
+
+    replyPlanState(turn, status, reason = '') {
+        const result = turn.result || turn.info;
+        if (result) { result.replyPlanStatus = status; result.replyPlanReason = reason; }
+        if (turn.id === this.latestWork && turn.epoch === this.generationEpoch && turn.chatKey === this.chatKey() && this.report) {
+            this.report.replyPlanStatus = status;
+            this.report.replyPlanReason = reason;
+        }
+        this.patchHistory(turn, { replyPlanStatus: status, replyPlanReason: reason });
+    }
+
+    warnReplyPlan(turn, reason) {
+        if (turn.planWarned || turn.id !== this.latestWork || turn.epoch !== this.generationEpoch || turn.chatKey !== this.chatKey()) return;
+        turn.planWarned = true;
+        try { this.onWarning(`本轮导演方案未注入：${reason}本轮不再使用该方案；仍沿用本轮资料构造结果继续生成，由正文自行构思。`); }
+        catch (error) { console.warn('[回声书台] 导演方案通知显示失败', error); }
+    }
+
+    omitReplyPlan(turn, reason, payload = null) {
+        this.native.clearSchedulerReplyPlan(turn);
+        if (payload) this.native.removeSchedulerReplyPlan(payload, turn);
+        this.replyPlanState(turn, 'omitted', reason);
+        this.warnReplyPlan(turn, reason);
+    }
+
+    replyPlanDependencyNames(turn) {
+        const available = turn.activeMap instanceof Map ? [...turn.activeMap.values()]
+            .filter(entry => String(entry.content || '').trim()) : [];
+        const missing = missingReplyPlanEntries(turn.result.replyPlan, turn.acceptedIds(available));
+        return missing.map(id => turn.catalog.get(id)?.comment || this.catalog.find(item => item.id === id)?.title || id);
+    }
+
+    applyReplyPlan(turn) {
+        if (turn.result.replyPlanStatus !== 'waiting') return;
+        const missing = this.replyPlanDependencyNames(turn);
+        if (missing.length) {
+            this.omitReplyPlan(turn, `世界书构造未接纳导演方案必需的资料：${missing.join('、')}。`);
+            return;
+        }
+        try {
+            this.native.injectSchedulerReplyPlan(turn);
+            this.replyPlanState(turn, 'injected');
+        } catch (error) {
+            this.omitReplyPlan(turn, error.message || '深度 0 导演方案注入失败。');
+        }
+    }
+
+    confirmReplyPlan(turn, payload) {
+        if (turn.result.replyPlanStatus !== 'injected') return;
+        const missing = this.replyPlanDependencyNames(turn);
+        const missingText = this.native.schedulerReplyPlanMissingReferences(payload, turn)
+            .map(id => turn.catalog.get(id)?.comment || this.catalog.find(item => item.id === id)?.title || id);
+        if (missing.length || missingText.length) {
+            this.omitReplyPlan(turn, `导演方案必需资料未完整保留在正文提示词中（可能被预算、正则或格式化改动）：${[...new Set([...missing, ...missingText])].join('、')}。`, payload);
+        } else if (!this.native.schedulerReplyPlanPresent(payload, turn)) {
+            this.omitReplyPlan(turn, '正文提示词没有完整保留本轮导演方案，可能被总上下文预算、正则或其他提示词操作移除。', payload);
+        }
     }
 
     async intercept(chat, contextSize, _abort, type) {
@@ -567,31 +667,28 @@ export class LorebookDirector {
         const identities = new Set([MODULE, EXTENSION_NAME, EXTENSION_FOLDER,
             `third-party/${MODULE}`, `third-party/${EXTENSION_NAME}`, `third-party/${EXTENSION_FOLDER}`]);
         const extensionDisabled = context.extensionSettings.disabledExtensions?.some(name => identities.has(name));
-        if (!config.enabled || extensionDisabled || !config.books.length || !SUPPORTED_TYPES.has(type || 'normal')) return;
+        if (!config.enabled || extensionDisabled || !SUPPORTED_TYPES.has(type || 'normal')) return;
         let op;
         try {
             op = this.begin('generation');
             op.type = type || 'normal';
             if (!context.eventTypes.WORLDINFO_SCAN_DONE) throw new Error('当前酒馆没有生成前世界书扫描接口。');
             const input = structuredClone(chat);
-            const { result, snapshot, catalog, prepared } = await this.select(input, op, op.type);
+            const { result, snapshot, catalog, prepared, replyPlanPrompt } = await this.select(input, op, op.type);
             this.assertCurrent(op);
             this.report = { ...result, mode: 'generation', actual: [], construction: 'waiting', at: Date.now(), chatKey: op.chatKey };
-            if (catalog.length) {
-                this.gate = new SchedulerScanGate({
-                    snapshot, catalog, prepared, result, input, contextSize, type: op.type,
-                    revision: this.revision, signature: op.signature, epoch: op.epoch, chatKey: op.chatKey, id: op.id,
-                    historyId: op.historyId, historyState: op.historyState,
-                });
-                this.scanGates.add(this.gate);
-                this.status = `蓝灯 ${result.blue.length} 条默认加入，绿灯 ${result.selected.length} 条入选，等待前后位置的世界书构造。`;
-            } else {
-                this.report.construction = 'empty';
-                this.status = `本轮没有可接管的蓝灯或绿灯；未调用筛选 API（${result.apiSkipReason}），正文继续原生生成。`;
-            }
+            this.gate = new SchedulerScanGate({
+                snapshot, catalog, prepared, result, input, contextSize, type: op.type, replyPlanPrompt,
+                revision: this.revision, signature: op.signature, epoch: op.epoch, chatKey: op.chatKey, id: op.id, nonce: op.nonce,
+                config: op.config, historyId: op.historyId, historyState: op.historyState,
+            });
+            this.scanGates.add(this.gate);
+            if (result.replyPlanStatus === 'omitted') this.warnReplyPlan(this.gate, result.replyPlanReason);
+            this.status = `导演方案已构思；蓝灯 ${result.blue.length} 条、绿灯 ${result.selected.length} 条，等待本轮世界书读取与深度 0 注入。${result.replyPlanReason}`;
         } catch (error) {
             this.failHistory(op, error);
             if (this.gate && this.gate.id === op?.id) {
+                this.native.clearSchedulerReplyPlan(this.gate);
                 this.gate.cancel();
                 this.gate = null;
             }
@@ -635,7 +732,18 @@ export class LorebookDirector {
         try {
             verifyNativeSources(payload, this.gate.snapshot);
             this.gate.stage(payload);
-            this.status = '本轮蓝灯与入选绿灯已准备好，正在构造世界书之前／之后。';
+            if (!this.gate.catalog.size) {
+                // With zero native entries the host returns before WORLDINFO_SCAN_DONE.
+                // No source is masked, so the confirmed source read suffices for a plan-only turn.
+                this.gate.injected = true;
+                this.gate.activeMap = new Map();
+                this.gate.committed = true;
+                this.report.construction = 'scan-accepted';
+                this.applyReplyPlan(this.gate);
+                this.status = '本轮没有托管条目需要接管；导演方案按聊天与角色约束准备，原生世界书处理保持不变。';
+            } else {
+                this.status = '本轮蓝灯与入选绿灯已准备好，正在构造世界书之前／之后及深度 0 导演方案。';
+            }
         } catch (error) {
             const gate = this.gate;
             gate.cancel();
@@ -660,6 +768,7 @@ export class LorebookDirector {
             try {
                 if (!gate.cancelled) {
                     gate.inject(args);
+                    this.applyReplyPlan(gate);
                     if (this.report?.mode === 'generation') {
                         this.report.construction = 'scan-accepted';
                         this.report.actual = gate.acceptedIds([...args.activated.entries.values()]);
@@ -673,7 +782,15 @@ export class LorebookDirector {
                 if (this.gate === gate) this.gate = null;
                 this.fallback(gate, error.message);
             }
+            if (gate.cancelled && !gate.catalog.size) {
+                this.native.clearSchedulerReplyPlan(gate);
+                gate.finish();
+                this.scanGates.delete(gate);
+                this.notify();
+                continue;
+            }
             if (gate.cancelled && !gate.recovered) {
+                this.native.clearSchedulerReplyPlan(gate);
                 gate.restoreScan(args.sortedEntries);
                 gate.removeInserted(args.activated?.entries);
                 try {
@@ -717,28 +834,36 @@ export class LorebookDirector {
         this.patchHistory(this.gate, { counts: { included: accepted.length } });
         this.gate.committed = true;
         this.gate.restoreScan();
-        this.status = '本轮资料已经交给酒馆构造提示词，辅助筛选已结束。';
+        const missing = this.replyPlanDependencyNames(this.gate);
+        if (this.gate.result.replyPlanStatus === 'injected' && missing.length) {
+            this.omitReplyPlan(this.gate, `世界书构造没有保留导演方案必需的资料：${missing.join('、')}。`);
+        }
+        this.status = '本轮资料与导演安排已交给酒馆构造提示词，辅助导演请求已结束。';
         this.notify();
     }
 
     onChatCompletionReady(data) {
         if (data?.dryRun || !this.gateIsCurrent()) return;
+        this.confirmReplyPlan(this.gate, data);
         this.report.promptPrepared = true;
         this.notify();
     }
 
-    onPromptReady(_data, dryRun = false) {
+    onPromptReady(data, dryRun = false) {
         if (dryRun) return;
         if (!this.gateIsCurrent()) return;
         const gate = this.gate;
         const { input, result } = gate;
         if (!gate.injected) {
+            this.native.clearSchedulerReplyPlan(gate);
+            this.native.removeSchedulerReplyPlan(data, gate);
             gate.cancel();
             this.gate = null;
             this.fallback(gate, '酒馆没有接纳本轮世界书扫描，本轮选择未注入。');
             this.notify();
             return;
         }
+        this.confirmReplyPlan(gate, data);
         const actual = new Set(gate.activeMap instanceof Map
             ? gate.acceptedIds([...gate.activeMap.values()]) : []);
         this.report.actual = [...actual];
@@ -759,12 +884,16 @@ export class LorebookDirector {
         }
         this.report.promptPrepared = true;
         this.report.construction = 'prepared';
+        const applied = Boolean(gate.catalog.size || result.replyPlanStatus === 'injected');
         this.patchHistory(gate, {
-            applicationStatus: 'applied', counts: { included: actual.size },
-            effectiveEntries: historyEffectiveEntries(gate.historyState?.plannedEntries, actual),
+            applicationStatus: applied ? 'applied' : 'unused', counts: { included: actual.size },
+            replyPlanStatus: result.replyPlanStatus, replyPlanReason: result.replyPlanReason,
+            ...(applied ? { effectiveEntries: historyEffectiveEntries(gate.historyState?.plannedEntries, actual) }
+                : { applicationReason: result.replyPlanReason || '本轮没有托管资料，导演方案也未采用。' }),
             ...(memoryFailure ? { ...memoryFailure, errorStage: 'memory', errorCode: 'ECHO_MEMORY_SAVE_FAILED' } : {}),
         });
-        this.status = `调度完成：蓝灯 ${result.blue.length} 条、绿灯 ${result.selected.length} 条，世界书构造接纳 ${actual.size} 条；原来的正文请求继续。${this.report.memoryError || ''}`;
+        this.status = `调度完成：${result.replyPlanStatus === 'injected' ? '导演方案已在深度 0 构造接纳' : '导演方案未注入'}；蓝灯 ${result.blue.length} 条、绿灯 ${result.selected.length} 条，世界书构造接纳 ${actual.size} 条；原来的正文请求继续。${result.replyPlanReason}${this.report.memoryError || ''}`;
+        this.native.clearSchedulerReplyPlan(gate);
         gate.finish();
         this.scanGates.delete(gate);
         this.gate = null;
@@ -780,7 +909,7 @@ export class LorebookDirector {
             this.assertCurrent(op);
             this.report = { ...result, mode: 'preview', actual: null, construction: 'preview', at: Date.now(), chatKey: op.chatKey };
             this.patchHistory(op, { applicationStatus: 'preview' });
-            this.status = `试选完成：蓝灯 ${result.blue.length} 条常驻、绿灯 ${result.selected.length} 条入选。${result.apiDispatched ? '筛选 API 已调用。' : `未调用筛选 API：${result.apiSkipReason}。`}没有注入正文或更新场景记忆。`;
+            this.status = `试运行完成：已构思本轮唯一主方向，蓝灯 ${result.blue.length} 条、绿灯 ${result.selected.length} 条。导演 API 已调用；没有注入正文或更新场景记忆。${result.replyPlanReason}`;
         } catch (error) {
             this.failHistory(op, error);
             if (!op || this.operation === op) {
