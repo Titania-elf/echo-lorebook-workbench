@@ -1,5 +1,6 @@
 import { historyConnectionInfo } from '../history/scheduler-history.js';
 import { organizationBackupName, organizationMetadata } from '../worldbook/organization-index.js';
+import { ORGANIZATION_BATCH_SIZE } from '../worldbook/organization-plan.js';
 import { clone, contextKey } from './workbench-state.js';
 import { scrollRegion } from './workbench-scroll.js';
 import { button, element } from './workbench-utils.js';
@@ -20,8 +21,20 @@ export class OrganizerUI {
         if (book !== this.book) {
             if (this.draft?.pending) throw new Error(`请先回到《${this.book}》核对上次写回结果。`);
             this.cancel();
-            Object.assign(this, { book, job: null, draft: null, message: '', error: '', page: 0 });
+            Object.assign(this, { book, job: null, draft: null, savedProgress: null, message: '', error: '', page: 0 });
         }
+        this.render();
+        if (!this.draft && !this.job) void this.refreshProgress();
+    }
+
+    async refreshProgress() {
+        const book = this.book;
+        const request = this.progressRequest = (this.progressRequest || 0) + 1;
+        let progress;
+        try { progress = await this.board.organizer.progressFor(book); }
+        catch { return; /* Starting analysis will surface any persistence error. */ }
+        if (!this.board.root || book !== this.book || request !== this.progressRequest || this.draft || this.job || this.saving) return;
+        this.savedProgress = progress;
         this.render();
     }
 
@@ -34,8 +47,9 @@ export class OrganizerUI {
         if (this.draft && !this.saving && !this.draft.pending) {
             this.draft = null;
             this.error = '';
-            this.message = '当前聊天已切换，已放弃预览。原书未写回。';
+            this.message = '当前聊天已切换，已关闭预览。原书未写回，本机已有进度会保留。';
             this.render();
+            void this.refreshProgress();
         }
     }
 
@@ -60,11 +74,12 @@ export class OrganizerUI {
         const context = { ...current, chatCompletionSettings: clone(current.chatCompletionSettings) };
         const config = clone(board.director.config);
         const origin = contextKey(context);
-        const choice = await board.sheets.choose('备份并发送全文？', element('div', {},
+        const continuing = Boolean(this.savedProgress);
+        const choice = await board.sheets.choose(continuing ? '继续整理世界书？' : '备份并发送全文？', element('div', {},
             element('p', { text: `世界书：《${book}》` }),
             element('p', { text: `API 方案：${this.connection(context, config)}` }),
-            element('p', { class: 'wb-help', text: '先确认整本备份保存成功，再向此连接发送已保存的条目全文（含禁用条目）。分析完成只展示预览，不会直接写回原书。' })),
-        [{ label: '取消', value: 'cancel' }, { label: '备份并发送全文', value: 'start', kind: 'primary' }]);
+            element('p', { class: 'wb-help', text: `核对整书备份后，按每批最多 ${ORGANIZATION_BATCH_SIZE} 个完整条目发送原文（含禁用条目）。已校验且未修改的条目不重复发送；全部完成后只展示预览，不直接写回原书。` })),
+        [{ label: '取消', value: 'cancel' }, { label: continuing ? '继续整理' : '备份并发送全文', value: 'start', kind: 'primary' }]);
         if (choice !== 'start' || book !== this.book || board.view !== 'organizer' || contextKey(board.getContext()) !== origin) return;
         await this.prepare((signal, progress) => board.organizer.prepare(book, { context, config, signal, onProgress: progress }));
     }
@@ -93,9 +108,29 @@ export class OrganizerUI {
         } finally {
             if (this.job === job) {
                 this.job = null;
-                if (job.signal.aborted) this.message = '已取消。没有写回原书；已创建的备份会保留。';
+                if (job.signal.aborted) this.message = '已取消。原书未写回，已保存的整理进度和备份会保留。';
                 this.render();
+                if (!this.draft) void this.refreshProgress();
             }
+        }
+    }
+
+    async discardPreview() {
+        const draft = this.draft;
+        if (!draft || draft.pending || this.saving) return;
+        this.saving = true;
+        this.render();
+        try {
+            await this.board.organizer.discardDraft(draft);
+            if (this.draft !== draft) return;
+            this.draft = null;
+            this.savedProgress = null;
+            this.error = '';
+            this.message = '已放弃预览，未写回原书。';
+        } finally {
+            this.saving = false;
+            this.render();
+            if (!this.draft) void this.refreshProgress();
         }
     }
 
@@ -122,6 +157,7 @@ export class OrganizerUI {
             const result = await this.board.organizer.apply(draft);
             if (result.written) {
                 this.draft = null;
+                this.savedProgress = null;
                 this.message = restoring ? `已从《${draft.backup}》恢复原书。` : `已写回 ${draft.afterCount} 个条目。备份《${draft.backup}》已保留。`;
                 if (result.warning) this.message += ` ${result.warning}`;
                 this.board.onBindingsChanged();
@@ -188,22 +224,22 @@ export class OrganizerUI {
                 const list = element('div', { class: 'wb-organize-groups' }, draft.groups.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE).map(group => this.groupView(group)));
                 content.append(list);
             }
-            if (!draft.pending) controls.push(button('放弃预览', { disabled: this.saving, onclick: () => {
-                this.draft = null; this.error = ''; this.message = '已放弃预览，未写回原书。'; this.render();
-            } }));
+            if (!draft.pending) controls.push(button('放弃预览', { disabled: this.saving, onclick: () => board.run(() => this.discardPreview()) }));
             if (!draft.conflict) controls.push(button(draft.pending ? '核对保存结果' : restoring ? '恢复同名原书' : '确认写回原书', {
                 kind: restoring && !draft.pending ? 'danger' : 'primary', glyph: draft.pending ? 'refresh' : 'save',
                 disabled: this.saving, onclick: () => board.run(() => this.apply()),
             }));
         } else {
-            content.append(element('p', { text: '先保存独立备份，再使用辅助模型通读整本书。模型只建议拆分位置、分类、绿灯主关键词和短摘要，不改写正文。' }),
+            content.append(element('p', { text: `先核对整书备份，再按每批最多 ${ORGANIZATION_BATCH_SIZE} 个完整条目整理。不截断原文，也不把单条拆成多次请求。` }),
                 element('p', { class: 'wb-help', text: `当前 API 方案：${this.connection()}` }));
+            if (this.savedProgress) content.append(element('p', { class: 'wb-help',
+                text: `本机已有 ${this.savedProgress.count} 条已校验的草稿。继续时核对原书，只发送仍需处理的条目。` }));
             if (backup) {
                 content.append(element('p', { class: 'wb-help', text: `最近备份：《${backup}》` }));
                 controls.push(button('预览恢复备份', { glyph: 'refresh', onclick: () => board.run(() => this.restore()) }));
             }
             content.append(this.progressNode);
-            controls.push(button('备份并整理', { kind: 'primary', glyph: 'layers', onclick: () => board.run(() => this.start()) }));
+            controls.push(button(this.savedProgress ? '继续整理' : '备份并整理', { kind: 'primary', glyph: 'layers', onclick: () => board.run(() => this.start()) }));
         }
         if (this.error) title.after(element('p', { class: 'wb-error wb-organize-error', role: 'alert', text: this.error }));
         this.view.replaceChildren(scrollRegion(content, 'wb-fill-scroll'));

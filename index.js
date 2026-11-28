@@ -6,6 +6,7 @@ import { requestModel } from './src/api/transport.js';
 import { NativeWorldbookAdapter } from './src/worldbook/native-adapter.js';
 import { EntryStore } from './src/worldbook/entry-store.js';
 import { BookOrganizer } from './src/worldbook/book-organizer.js';
+import { OrganizationCheckpointStore } from './src/worldbook/organization-checkpoints.js';
 import { WorkbenchSettings } from './src/workbench/workbench-state.js';
 import { WorldbookWorkbench } from './src/workbench/workbench.js';
 import { element } from './src/workbench/workbench-utils.js';
@@ -46,7 +47,7 @@ jQuery(async () => {
         onBegin: () => director.invalidate('正在保存原世界书，旧调度选择已失效。'),
         onCommit: change => director.sourceSaved(change),
     });
-    const organizer = new BookOrganizer({ store, getContext, requestModel });
+    const organizer = new BookOrganizer({ store, getContext, requestModel, checkpoints: new OrganizationCheckpointStore() });
     const workbench = new WorldbookWorkbench({ getContext, director, api, store, settings, history, organizer });
     const mountMenu = () => {
         const menu = document.getElementById('extensionsMenu');

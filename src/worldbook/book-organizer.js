@@ -1,32 +1,38 @@
 import { historyFailure } from '../history/scheduler-history.js';
 import { bookWatermark, contextKey, reserveBookWatermark, sameValue, UID_LIMIT } from '../workbench/workbench-state.js';
 import { organizationBackupName, organizationMetadata } from './organization-index.js';
+import { bookCategories } from './book-categories.js';
 import {
-    categoryMessages, materializeOrganization, organizationBatches, organizationMessages, organizationSnapshotVersion,
-    organizationSources, organizationUnits, organizationWindow, parseOrganizationCategories, parseOrganizationParts,
+    materializeOrganization, organizationBatches, organizationMessages, organizationSnapshotVersion,
+    organizationSources, parseOrganizationBatch, validateOrganizationParts,
 } from './organization-plan.js';
 
 const assertRunning = signal => {
     if (signal?.aborted) throw signal.reason || new DOMException('整理已取消。', 'AbortError');
 };
 
-function requestLimits(context, config) {
-    const followMain = config.apiMode === 'main'
-        || (config.apiMode === 'scheme' && config.apiSchemes.find(item => item.id === config.apiSchemeId)?.source === 'main');
-    const known = followMain ? Number(context.chatCompletionSettings?.openai_max_context) : 0;
-    const capacity = known > 0 ? Math.min(known, 28000) : 12000;
-    const output = Math.min(6800, Math.floor(capacity * .40));
-    const input = capacity - output - 900; // Leave room for the fixed rules and framing.
-    if (input < 1500 || output < 1240) throw new Error('当前连接的上下文太短，无法安全整理。请换用更长上下文的 API 方案。');
-    return { input, output };
+const CHECKPOINT_SCHEMA = 1;
+
+function replyBudget(context, config) {
+    const scheme = config.apiMode === 'scheme' ? config.apiSchemes?.find(item => item.id === config.apiSchemeId) : null;
+    const followsMain = config.apiMode === 'main' || scheme?.source === 'main';
+    const known = followsMain ? Number(context.chatCompletionSettings?.openai_max_context) : 0;
+    return known > 0 ? Math.max(1, Math.min(6800, Math.floor(known * .4))) : 6800;
 }
 
-const shortCard = part => ({ title: part.title, category: part.category, summary: part.summary, keywords: part.keywords });
-
 export class BookOrganizer {
-    constructor({ store, getContext, requestModel }) {
-        Object.assign(this, { store, getContext, requestModel });
+    constructor({ store, getContext, requestModel, checkpoints }) {
+        Object.assign(this, { store, getContext, requestModel, checkpoints });
         this.api = store.api;
+    }
+
+    async progressFor(book) {
+        const value = await this.checkpoints.read(book);
+        return value?.schema === CHECKPOINT_SCHEMA ? { count: Object.keys(value.records || {}).length } : null;
+    }
+
+    async discardDraft(draft) {
+        if (draft.checkpoint) await this.checkpoints.replace(draft.book, draft.checkpoint, null);
     }
 
     assertIdle() {
@@ -47,83 +53,89 @@ export class BookOrganizer {
         const baseline = await this.readSaved(book, signal);
         const sources = organizationSources(baseline);
         if (!sources.some(item => item.text.trim())) throw new Error('这本世界书没有可整理的正文。');
-        const limits = requestLimits(context, config);
-        const batches = organizationBatches(sources, limits);
-        onProgress('正在创建并核对完整备份…');
-        const backup = await this.api.createOrganizationBackup(book, baseline, { signal });
+        const backupVersion = organizationSnapshotVersion(baseline);
+        let checkpoint = await this.checkpoints.read(book);
         assertRunning(signal);
-
-        const request = async (messages, maxTokens = limits.output) => {
-            assertRunning(signal);
-            const result = await this.requestModel(context, config, messages, signal, maxTokens);
-            assertRunning(signal);
-            return result;
-        };
-        try {
-            const proposals = new Map();
-            for (const [index, batch] of batches.entries()) {
-                onProgress(`已备份《${backup}》。正在通读原文：${index + 1} / ${batches.length} 批…`);
-                const result = parseOrganizationParts(await request(organizationMessages(batch)), batch);
-                for (const [id, parts] of result) proposals.set(id, parts);
-            }
-            const plans = new Map();
-            for (const source of sources) {
-                let parts = source.windows.flatMap(({ id, start }) => proposals.get(id).map(part => ({
-                    ...part, start: start + part.start, end: start + part.end,
-                })));
-                if (source.windows.length > 1) {
-                    onProgress(`正在统一长条目的拆分边界：${source.title.slice(0, 80)}…`);
-                    parts = await this.combineWindows(source, parts, limits, request);
-                }
+        const previous = checkpoint?.schema === CHECKPOINT_SCHEMA ? checkpoint : null;
+        const fingerprints = new Map(sources.map(source => [source.uid, organizationSnapshotVersion([source.entry, source.category])]));
+        const plans = new Map();
+        const records = new Map();
+        for (const source of sources) {
+            const saved = previous?.records && Object.hasOwn(previous.records, source.uid) ? previous.records[source.uid] : null;
+            if (!saved || saved.fingerprint !== fingerprints.get(source.uid)) continue;
+            try {
+                const parts = validateOrganizationParts(source, saved.parts);
                 plans.set(source.uid, parts);
-            }
-            const labels = [...new Set([...plans.values()].flatMap(parts => parts.map(part => part.category)))];
-            let unified = new Map();
-            if (batches.length > 1 && labels.length > 1) {
-                onProgress('全文已读完，正在统一各批次的分类…');
-                if (organizationUnits(labels) > limits.input || organizationUnits(labels) + 100 > limits.output) {
-                    throw new Error('分类数量超出当前模型可处理的范围。请换用更长上下文的连接。');
+                records.set(source.uid, { fingerprint: saved.fingerprint, parts });
+            } catch { /* The book is still untouched; invalid or outdated drafts are processed again. */ }
+        }
+
+        let backup = '';
+        if (previous?.backupVersion === backupVersion && typeof previous.backup === 'string' && previous.backup !== book) {
+            onProgress('正在核对上次保留的整书备份…');
+            try {
+                const saved = await this.api.readBook(previous.backup, { fresh: true, signal });
+                if (sameValue(saved, baseline)) backup = previous.backup;
+            } catch { assertRunning(signal); }
+        }
+        if (!backup) {
+            onProgress('正在创建并核对完整备份…');
+            backup = await this.api.createOrganizationBackup(book, baseline, { signal });
+        }
+        assertRunning(signal);
+        const saveProgress = async () => {
+            checkpoint = await this.checkpoints.replace(book, checkpoint, {
+                schema: CHECKPOINT_SCHEMA, backup, backupVersion, records: Object.fromEntries(records),
+            });
+        };
+        const categories = new Set(bookCategories(baseline).map(category => category.name));
+        for (const parts of plans.values()) for (const part of parts) categories.add(part.category);
+        const batches = organizationBatches(sources.filter(source => !plans.has(source.uid)));
+        const failures = [];
+        const maxTokens = replyBudget(context, config);
+        try {
+            await saveProgress();
+            for (const [index, batch] of batches.entries()) {
+                assertRunning(signal);
+                const batchName = `第 ${index + 1}/${batches.length} 批`;
+                onProgress(`已保留 ${plans.size}/${sources.length} 条进度。正在整理${batchName}（${batch.length} 条完整原文）…`);
+                let text;
+                try {
+                    text = await this.requestModel(context, config, organizationMessages(batch, [...categories].slice(-60)), signal, maxTokens);
+                } catch (error) {
+                    assertRunning(signal);
+                    throw new Error(`${batchName}（${batch.length} 条完整原文）请求失败：${historyFailure(error, config).error} 若模型上下文不足，请换用更长上下文的连接。`);
                 }
-                unified = parseOrganizationCategories(await request(categoryMessages(labels)), labels);
+                assertRunning(signal);
+                let result;
+                try { result = parseOrganizationBatch(text, batch); }
+                catch (error) {
+                    failures.push(`${batchName}：${error.message}`);
+                    continue;
+                }
+                for (const [uid, parts] of result.plans) {
+                    plans.set(uid, parts);
+                    records.set(uid, { fingerprint: fingerprints.get(uid), parts });
+                    for (const part of parts) categories.add(part.category);
+                }
+                if (result.plans.size) await saveProgress();
+                for (const item of result.failures) failures.push(`${batchName}条目 #${item.uid}：${item.message}`);
             }
             assertRunning(signal);
+            if (plans.size !== sources.length) {
+                throw new Error(`还有 ${sources.length - plans.size} 条未完成。${failures.slice(0, 3).join(' ')}`);
+            }
             const prepared = materializeOrganization(baseline, sources, plans, {
-                book, backupName: backup, labels: unified,
+                book, backupName: backup,
                 nextUid: data => this.store.nextUid(book, data), synchronize: this.api.synchronizeOriginalData.bind(this.api),
             });
-            return { ...prepared, action: 'organize', book, backup, baseline,
-                backupVersion: organizationSnapshotVersion(baseline), context: contextKey(context), pending: false };
+            return { ...prepared, action: 'organize', book, backup, baseline, backupVersion, checkpoint,
+                context: contextKey(context), pending: false };
         } catch (error) {
             assertRunning(signal);
-            throw new Error(`${historyFailure(error, config).error} 原书未改动，备份《${backup}》已保留。`);
+            const count = checkpoint?.schema === CHECKPOINT_SCHEMA ? Object.keys(checkpoint.records || {}).length : 0;
+            throw new Error(`${historyFailure(error, config).error} 原书未改动，备份《${backup}》已保留。本机草稿已有 ${count} 条，再次整理时只请求未完成或已变动的条目。`);
         }
-    }
-
-    async combineWindows(source, parts, limits, request) {
-        const combine = async (group, maySplit) => {
-            const wire = organizationWindow(source, 'long-entry', group.map(shortCard), { maySplit });
-            const result = await request(organizationMessages([wire], { coalesce: true }));
-            return parseOrganizationParts(result, [wire]).get(wire.id).map(part => ({
-                ...part, start: group[part.start].start, end: group[part.end - 1].end,
-            }));
-        };
-        // For exceptionally long entries, merge adjacent card windows without discarding any source span.
-        const size = organizationUnits(organizationWindow(source, 'long-entry', [], { maySplit: false })) + 10;
-        while (size + organizationUnits(parts.map(shortCard)) > limits.input) {
-            const groups = [];
-            let group = [], cost = size;
-            for (const part of parts) {
-                const next = organizationUnits(shortCard(part)) + 2;
-                if (group.length && cost + next > limits.input) { groups.push(group); group = []; cost = size; }
-                if (cost + next > limits.input) throw new Error('单条目录卡超出整理请求预算。');
-                group.push(part); cost += next;
-            }
-            if (group.length) groups.push(group);
-            if (groups.length >= parts.length) throw new Error('长条目的目录无法在当前请求预算下合并。');
-            parts = [];
-            for (const chunk of groups) parts.push(...(chunk.length > 1 ? await combine(chunk, false) : chunk));
-        }
-        return combine(parts, !source.restriction);
     }
 
     async prepareRestore(book, signal) {
@@ -209,6 +221,8 @@ export class BookOrganizer {
         let warning = accepted.warning || '';
         try { await store.onCommit({ book: draft.book, uid: null, context: draft.context }); }
         catch { warning ||= '原书已保存，工作台未能刷新调度目录。'; }
+        try { await this.discardDraft(draft); }
+        catch { warning = [warning, '原书已保存，但本机整理草稿未能清理。'].filter(Boolean).join(' '); }
         return { written: true, warning };
     }
 }
