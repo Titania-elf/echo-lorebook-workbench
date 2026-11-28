@@ -1,4 +1,4 @@
-import { element, button } from './workbench-utils.js';
+import { element, button, icon } from './workbench-utils.js';
 import { scrollRegion } from './workbench-scroll.js';
 import { sameValue, clone } from './workbench-state.js';
 import { apiSelection, apiSelectionPatch, normalizeAPISchemes } from '../scheduler/core.js';
@@ -54,8 +54,15 @@ export class APISettingsUI {
         this.source = element('select', { id: 'wb-api-source' },
             element('option', { value: 'custom', text: '自定义 API（OpenAI 兼容）' }),
             element('option', { value: 'main', text: '跟随酒馆主连接' }));
-        this.url = element('input', { id: 'wb-api-url', type: 'url', autocomplete: 'off', placeholder: 'https://example.com/v1', spellcheck: false });
+        this.url = element('input', { id: 'wb-api-url', type: 'url', autocomplete: 'off', placeholder: 'http://127.0.0.1:8000/v1', spellcheck: false });
         this.key = element('input', { id: 'wb-api-key', type: 'password', autocomplete: 'off', placeholder: '无需密钥的本地接口可留空', spellcheck: false });
+        this.forwardFields = [
+            ['forwardHeaders', '附加请求头', 'X-API-Key: your-key', 'YAML 或 JSON 映射，同时用于模型列表和生成。可覆盖默认 Authorization；含密钥的值会随方案保存。'],
+            ['forwardBody', '附加请求参数', 'chat_template_kwargs:\n  enable_thinking: false', 'YAML 或 JSON 映射，只用于生成，交由酒馆后端加入上游请求。'],
+            ['forwardExclude', '排除字段', '- temperature', 'YAML 或 JSON 列表，只用于生成。例如移除上游不支持的 temperature 字段。'],
+        ].map(([key, label, placeholder, hint]) => ({ key, label, hint,
+            input: element('textarea', { id: `wb-api-${key}`, placeholder, rows: 3, spellcheck: false, autocomplete: 'off' }),
+        }));
         this.model = element('input', { id: 'wb-api-model', type: 'text', autocomplete: 'off', placeholder: '选择模型，或手动填写模型 ID', spellcheck: false });
         this.modelSelect = element('select', { id: 'wb-api-model-list', 'aria-label': '可用模型' });
         this.modelSelect.addEventListener('change', () => {
@@ -78,7 +85,9 @@ export class APISettingsUI {
             if (!this.scheme) return;
             this.scheme.source = this.source.value; this.renderScheme(); this.update(); this.queueModels();
         });
-        for (const [key, input] of [['name', this.name], ['url', this.url], ['apiKey', this.key], ['model', this.model]]) {
+        const observedFields = [['name', this.name], ['url', this.url], ['apiKey', this.key], ['model', this.model],
+            ...this.forwardFields.map(({ key, input }) => [key, input])];
+        for (const [key, input] of observedFields) {
             const change = () => {
                 const scheme = this.scheme;
                 if (!scheme || scheme[key] === input.value) return;
@@ -87,7 +96,7 @@ export class APISettingsUI {
                     const option = [...this.profile.options].find(value => value.value === `scheme:${scheme.id}`);
                     if (option) option.textContent = scheme.name || '未命名方案';
                 }
-                if (key === 'url' || key === 'apiKey') {
+                if (key === 'url' || key === 'apiKey' || key === 'forwardHeaders') {
                     this.cancelModelFetch(); this.lastModelFetch = '';
                     scheme.models = []; this.renderModels(); this.queueModels();
                 }
@@ -109,11 +118,14 @@ export class APISettingsUI {
         this.schemeGroup = element('section', { class: 'wb-settings-body' },
             element('div', { class: 'wb-api-grid' }, this.field(this.name, '方案名称'), this.field(this.source, '连接方式')));
         this.customGroup = element('section', { class: 'wb-settings-body' },
-            this.field(this.url, 'API 基础地址'),
+            this.field(this.url, 'API 基础地址', '填写酒馆服务端能访问的地址；如果酒馆在容器或远程机器运行，127.0.0.1 指向酒馆所在环境。'),
             this.field(this.key, 'API 密钥', '密钥以明文随方案保存在当前用户的酒馆设置中。'),
             element('div', { class: 'wb-api-model-row' }, this.field(this.modelSelect, '可用模型'), this.refreshModelsButton),
             this.field(this.model, '模型 ID（可手动填写）'),
-            this.autoModels, this.modelStatus);
+            this.autoModels, this.modelStatus,
+            element('details', { class: 'wb-details' }, element('summary', {}, '本地反代选项', icon('down')),
+                element('div', { class: 'wb-details-body wb-settings-body' },
+                    ...this.forwardFields.map(({ input, label, hint }) => this.field(input, label, hint)))));
         this.schemeGroup.append(this.customGroup);
         this.state = element('span', { class: 'wb-dirty-status', role: 'status' });
         this.discardButton = button('放弃修改', { onclick: () => this.discard() });
@@ -121,7 +133,7 @@ export class APISettingsUI {
         this.actions = element('div', { class: 'wb-action-row' }, this.state,
             element('div', { class: 'wb-action-buttons' }, this.discardButton, this.save));
         const form = element('form', { class: 'wb-api-settings' },
-            element('p', { class: 'wb-help', text: '为世界书目录筛选和 AI 整理保存独立 API 方案，或直接跟随酒馆主连接。' }),
+            element('p', { class: 'wb-help', text: '世界书目录筛选、AI 整理和模型列表都使用酒馆后端转发，不切换正文连接。' }),
             element('div', { class: 'wb-api-toolbar' }, this.field(this.profile, '当前 API 方案'),
                 element('div', { class: 'wb-api-scheme-actions' }, this.addButton, this.deleteButton)),
             this.schemeGroup, this.mainSummary,
@@ -162,6 +174,7 @@ export class APISettingsUI {
         this.url.value = scheme?.url || '';
         this.key.value = scheme?.apiKey || '';
         this.model.value = scheme?.model || '';
+        for (const { key, input } of this.forwardFields) input.value = scheme?.[key] || '';
         this.timeout.value = this.draft.timeoutSeconds ?? '';
         this.modelStatus.textContent = scheme?.models.length ? `已有 ${scheme.models.length} 个模型，可以重新获取。` : '填写 API 地址后自动获取模型列表，也可以手动填写模型 ID。';
         this.renderModels();
@@ -181,7 +194,7 @@ export class APISettingsUI {
         const scheme = this.scheme;
         if (!scheme || scheme.source !== 'custom' || !scheme.autoModels || scheme.models.length) return;
         try { normalizeAPIURL(scheme.url); } catch { return; }
-        const signature = JSON.stringify([scheme.id, scheme.url, scheme.apiKey]);
+        const signature = JSON.stringify([scheme.id, scheme.url, scheme.apiKey, scheme.forwardHeaders]);
         if (signature === this.lastModelFetch) return;
         this.autoTimer = setTimeout(() => {
             this.autoTimer = null;
@@ -203,18 +216,10 @@ export class APISettingsUI {
         const scheme = this.scheme;
         if (!scheme || scheme.source !== 'custom') throw new Error('请选择一个自定义 API 方案。');
         if (!automatic && this.locked) throw new Error('先完成当前请求或原书保存。');
-        let snapshot;
-        try {
-            snapshot = validateAPIScheme({ ...clone(scheme), name: scheme.name.trim() || 'API 方案' });
-            normalizeAPIURL(snapshot.url);
-        } catch (error) {
-            this.modelStatus.textContent = error.message;
-            if (automatic) return;
-            throw error;
-        }
+        const snapshot = clone(scheme);
         this.cancelModelFetch();
         const request = ++this.modelRequest;
-        this.lastModelFetch = JSON.stringify([scheme.id, scheme.url, scheme.apiKey]);
+        this.lastModelFetch = JSON.stringify([scheme.id, scheme.url, scheme.apiKey, scheme.forwardHeaders]);
         const controller = new AbortController();
         this.modelController = controller;
         this.fetching = true; this.modelStatus.textContent = '正在获取模型列表…'; this.update();
@@ -239,7 +244,7 @@ export class APISettingsUI {
         let index = 1;
         while (this.draft.apiSchemes.some(value => value.name === `API 方案 ${index}`)) index++;
         const random = globalThis.crypto?.randomUUID?.() || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
-        const scheme = { id: `scheme-${random}`, name: `API 方案 ${index}`, source: 'custom', url: '', apiKey: '', model: '', models: [], autoModels: true };
+        const [scheme] = normalizeAPISchemes([{ id: `scheme-${random}`, name: `API 方案 ${index}`, source: 'custom' }]);
         this.draft.apiSchemes.push(scheme);
         Object.assign(this.draft, apiSelectionPatch(`scheme:${scheme.id}`));
         this.refreshProfiles(); this.renderScheme(); this.update();
@@ -274,7 +279,7 @@ export class APISettingsUI {
         this.deleteButton.disabled = this.locked || !scheme;
         this.name.disabled = this.locked || !scheme;
         this.source.disabled = this.locked || !scheme;
-        for (const input of [this.url, this.key, this.model]) input.disabled = this.locked || !custom;
+        for (const input of [this.url, this.key, this.model, ...this.forwardFields.map(field => field.input)]) input.disabled = this.locked || !custom;
         this.modelSelect.disabled = this.locked || !custom || !scheme.models.length;
         this.refreshModelsButton.disabled = this.locked || !custom || this.fetching;
         this.autoModels.disabled = this.locked || !custom;

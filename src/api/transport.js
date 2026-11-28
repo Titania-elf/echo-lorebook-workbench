@@ -1,12 +1,22 @@
+import { extractMessageFromData } from '../../../../../../script.js';
 import { createGenerationParameters } from '../../../../../openai.js';
 import { selectedAPIScheme, customAPIData } from './api-connections.js';
+import { requestTavernBackend } from './tavern-backend.js';
 
-/** Send directly through ST's backend, without Generate/quiet-prompt recursion or global setting changes. */
+async function sendChat(context, data, signal, secret) {
+    const result = await requestTavernBackend(context, 'generate', data, signal, { secret });
+    const content = typeof result?.content === 'string' ? result.content
+        : typeof result?.message?.content === 'string' ? result.message.content
+            : extractMessageFromData(result, 'openai');
+    return { content };
+}
+
+/** No browser-to-provider connection, Generate recursion or global setting changes. */
 export async function requestModel(context, config, messages, parentSignal, maxTokens = 1800, { onDispatch = () => {}, onResponse = () => {} } = {}) {
     const controller = new AbortController();
     const onAbort = () => controller.abort(parentSignal.reason || new Error('请求已取消。'));
-    parentSignal.addEventListener('abort', onAbort, { once: true });
-    if (parentSignal.aborted) onAbort();
+    parentSignal?.addEventListener('abort', onAbort, { once: true });
+    if (parentSignal?.aborted) onAbort();
     const timer = setTimeout(() => {
         const error = new Error('辅助模型请求超时；请检查连接或提高超时秒数。');
         error.code = 'ECHO_REQUEST_TIMEOUT';
@@ -20,7 +30,6 @@ export async function requestModel(context, config, messages, parentSignal, maxT
     });
     const send = async () => {
         if (controller.signal.aborted) throw controller.signal.reason;
-        if (typeof context.ChatCompletionService?.sendRequest !== 'function') throw new Error('酒馆的辅助请求服务尚未准备好。');
         let result;
         const scheme = selectedAPIScheme(config);
         if (scheme?.source === 'custom') {
@@ -29,44 +38,41 @@ export async function requestModel(context, config, messages, parentSignal, maxT
                 max_tokens: maxTokens, temperature: 0.2, stream: false, n: 1,
             };
             onDispatch({ model: scheme.model });
-            result = await context.ChatCompletionService.sendRequest(data, true, controller.signal);
+            result = await sendChat(context, data, controller.signal, scheme.apiKey);
         } else if (!scheme && (config.apiMode === 'profile' || (!config.apiMode && config.profileId))) {
-            if (!config.profileId || !context.ConnectionManagerRequestService?.sendRequest) {
+            const service = context.ConnectionManagerRequestService;
+            if (!config.profileId || !service?.sendRequest || !service?.getSupportedProfiles) {
                 throw new Error('所选酒馆连接已失效，请在调度器 API 设置中重新选择。');
             }
-            const profiles = context.ConnectionManagerRequestService.getSupportedProfiles();
-            const profile = profiles.find(value => value.id === config.profileId);
+            const profile = service.getSupportedProfiles().find(value => value.id === config.profileId);
             if (!profile) throw new Error('所选酒馆连接已失效，请在调度器 API 设置中重新选择。');
-            // This service may still prepare a saved preset before making its HTTP call.
+            // Keep the host's provider, authentication, proxy preset and prompt processing intact.
             onDispatch({ model: profile.model || profile.name || '', submittedOnly: true });
-            // Saved connection profiles keep provider selection and secrets inside SillyTavern.
-            result = await context.ConnectionManagerRequestService.sendRequest(config.profileId, structuredClone(messages), maxTokens, {
+            result = await service.sendRequest(config.profileId, structuredClone(messages), maxTokens, {
                 stream: false, signal: controller.signal, extractData: true, includePreset: true,
             }, {
                 stream: false, n: 1, enable_web_search: false, request_images: false,
-                custom_prompt_post_processing: 'none',
                 tools: undefined, tool_choice: undefined, stop: [], logit_bias: {},
             });
         } else {
             if (context.mainApi !== 'openai') {
-                throw new Error('跟随主连接需要酒馆使用聊天补全；也可以选择已有连接或新建独立 API 方案。');
+                throw new Error('跟随主连接仅支持酒馆的聊天补全；也可选择已有连接或新建独立 API 方案。');
             }
             const settings = structuredClone(context.chatCompletionSettings);
             Object.assign(settings, {
                 openai_max_tokens: maxTokens, stream_openai: false, n: 1, function_calling: false,
                 enable_web_search: false, request_images: false,
-                custom_prompt_post_processing: 'none',
             });
             const model = context.getChatCompletionModel(settings);
             if (!model) throw new Error('当前聊天补全连接未选择模型。');
             const { generate_data: data } = await createGenerationParameters(settings, model, 'quiet', structuredClone(messages));
-            // Do not inherit roleplay stop strings, token bias, tools, or multiple samples.
+            // Preserve native routing and prompt processing, but not roleplay stops, tools or swipes.
             for (const key of ['tools', 'tool_choice', 'stop', 'logit_bias', 'logprobs', 'top_logprobs']) delete data[key];
+            if (controller.signal.aborted) throw controller.signal.reason;
             data.stream = false;
             data.n = 1;
-            data.custom_prompt_post_processing = 'none';
             onDispatch({ model });
-            result = await context.ChatCompletionService.sendRequest(data, true, controller.signal);
+            result = await sendChat(context, data, controller.signal);
         }
         try {
             const observation = onResponse({
@@ -99,7 +105,7 @@ export async function requestModel(context, config, messages, parentSignal, maxT
         throw error;
     } finally {
         clearTimeout(timer);
-        parentSignal.removeEventListener('abort', onAbort);
+        parentSignal?.removeEventListener('abort', onAbort);
         controller.signal.removeEventListener('abort', rejectOnAbort);
     }
 }

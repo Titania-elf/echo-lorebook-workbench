@@ -52,6 +52,9 @@ export function normalizeAPISchemes(values) {
         url: typeof value.url === 'string' ? value.url : '',
         apiKey: typeof value.apiKey === 'string' ? value.apiKey : '',
         model: typeof value.model === 'string' ? value.model : '',
+        forwardHeaders: typeof value.forwardHeaders === 'string' ? value.forwardHeaders : '',
+        forwardBody: typeof value.forwardBody === 'string' ? value.forwardBody : '',
+        forwardExclude: typeof value.forwardExclude === 'string' ? value.forwardExclude : '',
         models: [...new Set((Array.isArray(value.models) ? value.models : []).filter(id => typeof id === 'string' && id.trim()).map(id => id.trim()))],
         autoModels: value.autoModels !== false,
     }));
