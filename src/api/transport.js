@@ -63,8 +63,8 @@ export async function requestModel(context, config, messages, parentSignal, maxT
                 openai_max_tokens: maxTokens, stream_openai: false, n: 1, function_calling: false,
                 enable_web_search: false, request_images: false,
             });
-            const model = context.getChatCompletionModel(settings);
-            if (!model) throw new Error('当前聊天补全连接未选择模型。');
+            const model = (scheme || config).mainModel?.trim() || context.getChatCompletionModel(settings);
+            if (!model) throw new Error('请在调度器 API 设置中指定辅助模型，或在酒馆主连接中选择正文模型。');
             const { generate_data: data } = await createGenerationParameters(settings, model, 'quiet', structuredClone(messages));
             // Preserve native routing and prompt processing, but not roleplay stops, tools or swipes.
             for (const key of ['tools', 'tool_choice', 'stop', 'logit_bias', 'logprobs', 'top_logprobs']) delete data[key];

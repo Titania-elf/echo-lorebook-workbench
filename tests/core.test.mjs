@@ -4,6 +4,7 @@ import {
     settingsWithDefaults, entryId, entryVersion, sourceFingerprint, makeCatalog,
     validateSelection, parseJsonObject, allocateSelection, resolveOverride, selectorPayload,
 } from '../src/scheduler/core.js';
+import { historyConnectionInfo } from '../src/history/scheduler-history.js';
 
 const entry = (uid, extra = {}) => ({ world: '北境', uid, comment: `条目 ${uid}`, content: `原文 ${uid}`, key: ['商会'], ...extra });
 const card = (uid, ancestors = []) => ({ category: '地点', summary: `检索说明 ${uid}`, ancestors });
@@ -39,6 +40,20 @@ test('settings opt in, normalize values, and migrate away from pre-v2 custom rol
     assert.equal(value.promptRoleVersion, 2);
     assert.deepEqual(value.promptTemplates, defaults.promptTemplates);
     assert.equal(settingsWithDefaults({ ...legacy, promptRoleVersion: 2 }).promptTemplates.selector[0].role, 'assistant');
+});
+
+test('stored main-connection models are independent and use the matching history label', () => {
+    const context = { getChatCompletionModel: () => 'body-model' };
+    const base = settingsWithDefaults({ mainModel: ' one ', apiSchemes: [
+        { id: 'second', name: '随主连接', source: 'main', model: 'dormant-custom', mainModel: ' two ' },
+        { id: 'legacy', name: '旧方案', source: 'main', model: 'dormant-custom' },
+    ] });
+    assert.equal(base.mainModel, 'one');
+    assert.equal(base.apiSchemes[0].mainModel, 'two');
+    assert.equal(base.apiSchemes[1].mainModel, '');
+    assert.equal(historyConnectionInfo(context, base).model, 'one');
+    assert.equal(historyConnectionInfo(context, { ...base, apiMode: 'scheme', apiSchemeId: 'second' }).model, 'two');
+    assert.equal(historyConnectionInfo(context, { ...base, apiMode: 'scheme', apiSchemeId: 'legacy' }).model, 'body-model');
 });
 
 test('entry IDs and saved-source comparisons remain stable', () => {

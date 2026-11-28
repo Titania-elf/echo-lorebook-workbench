@@ -2,7 +2,29 @@ import { element, button, icon } from './workbench-utils.js';
 import { scrollRegion } from './workbench-scroll.js';
 import { sameValue, clone } from './workbench-state.js';
 import { apiSelection, apiSelectionPatch, normalizeAPISchemes } from '../scheduler/core.js';
-import { fetchAPIModels, normalizeAPIURL, validateAPIScheme } from '../api/api-connections.js';
+import { fetchAPIModels, fetchMainAPIModels, mainAPIStatusData, normalizeAPIURL, validateAPIScheme } from '../api/api-connections.js';
+
+function nativeModelId(context) {
+    if (context.mainApi !== 'openai') return '';
+    try { return context.getChatCompletionModel(context.chatCompletionSettings) || ''; }
+    catch { return ''; }
+}
+
+function nativeModelOptions(context) {
+    const source = context.chatCompletionSettings?.chat_completion_source;
+    if (context.mainApi !== 'openai' || !source) return [];
+    const ids = new Set();
+    // Fall back to the current provider's own controls, never the shared last-loaded model list.
+    for (const control of document.querySelectorAll('select[id^="model_"], datalist[id^="model_"]')) {
+        const sources = control.closest('[data-source]')?.dataset.source?.split(',').map(value => value.trim());
+        if (!sources?.includes(source)) continue;
+        for (const option of control.options) {
+            const id = option.value.trim();
+            if (id && id !== 'OR_Website' && !option.disabled && !option.closest('optgroup')?.disabled) ids.add(id);
+        }
+    }
+    return [...ids];
+}
 
 export class APISettingsUI {
     constructor(workbench) {
@@ -20,7 +42,7 @@ export class APISettingsUI {
         const config = this.director.config;
         return {
             apiMode: config.apiMode, apiSchemeId: config.apiSchemeId, profileId: config.profileId,
-            apiSchemes: clone(config.apiSchemes), timeoutSeconds: config.timeoutSeconds,
+            apiSchemes: clone(config.apiSchemes), mainModel: config.mainModel, timeoutSeconds: config.timeoutSeconds,
         };
     }
 
@@ -34,6 +56,17 @@ export class APISettingsUI {
     get locked() { return this.director.busy || this.workbench.store.busy; }
     get scheme() {
         return this.draft.apiMode === 'scheme' ? this.draft.apiSchemes.find(value => value.id === this.draft.apiSchemeId) : null;
+    }
+    get followsMain() { return this.draft.apiMode === 'main' || this.scheme?.source === 'main'; }
+    get modelTarget() { return this.followsMain ? this.scheme || this.draft : this.scheme; }
+    get modelKey() { return this.followsMain ? 'mainModel' : 'model'; }
+    get auxiliaryModel() { return this.modelTarget?.[this.modelKey] || ''; }
+
+    setModel(value) {
+        const target = this.modelTarget;
+        if (!target) return;
+        target[this.modelKey] = value;
+        this.update();
     }
 
     field(input, label, hint = '') {
@@ -66,9 +99,16 @@ export class APISettingsUI {
         this.model = element('input', { id: 'wb-api-model', type: 'text', autocomplete: 'off', placeholder: '选择模型，或手动填写模型 ID', spellcheck: false });
         this.modelSelect = element('select', { id: 'wb-api-model-list', 'aria-label': '可用模型' });
         this.modelSelect.addEventListener('change', () => {
-            if (!this.scheme || !this.modelSelect.value) return;
-            this.scheme.model = this.modelSelect.value; this.model.value = this.scheme.model; this.update();
+            if (!this.modelTarget || (!this.followsMain && !this.modelSelect.value)) return;
+            this.model.value = this.modelSelect.value;
+            this.setModel(this.model.value);
         });
+        const editModel = () => {
+            this.setModel(this.model.value);
+            this.modelSelect.value = this.model.value.trim();
+        };
+        this.model.addEventListener('input', editModel);
+        this.model.addEventListener('change', () => { editModel(); this.renderModels(); });
         this.refreshModelsButton = button('获取模型列表', { glyph: 'refresh', onclick: () => workbench.run(() => this.fetchModels()) });
         this.autoModels = button('自动获取模型列表', {
             class: 'wb-entry-toggle wb-api-auto', role: 'switch', 'aria-checked': true,
@@ -85,7 +125,7 @@ export class APISettingsUI {
             if (!this.scheme) return;
             this.scheme.source = this.source.value; this.renderScheme(); this.update(); this.queueModels();
         });
-        const observedFields = [['name', this.name], ['url', this.url], ['apiKey', this.key], ['model', this.model],
+        const observedFields = [['name', this.name], ['url', this.url], ['apiKey', this.key],
             ...this.forwardFields.map(({ key, input }) => [key, input])];
         for (const [key, input] of observedFields) {
             const change = () => {
@@ -100,7 +140,6 @@ export class APISettingsUI {
                     this.cancelModelFetch(); this.lastModelFetch = '';
                     scheme.models = []; this.renderModels(); this.queueModels();
                 }
-                if (key === 'model') this.modelSelect.value = scheme.models.includes(input.value) ? input.value : '';
                 this.update();
             };
             input.addEventListener('input', change);
@@ -120,13 +159,13 @@ export class APISettingsUI {
         this.customGroup = element('section', { class: 'wb-settings-body' },
             this.field(this.url, 'API 基础地址', '填写酒馆服务端能访问的地址；如果酒馆在容器或远程机器运行，127.0.0.1 指向酒馆所在环境。'),
             this.field(this.key, 'API 密钥', '密钥以明文随方案保存在当前用户的酒馆设置中。'),
-            element('div', { class: 'wb-api-model-row' }, this.field(this.modelSelect, '可用模型'), this.refreshModelsButton),
-            this.field(this.model, '模型 ID（可手动填写）'),
-            this.autoModels, this.modelStatus,
             element('details', { class: 'wb-details' }, element('summary', {}, '本地反代选项', icon('down')),
                 element('div', { class: 'wb-details-body wb-settings-body' },
                     ...this.forwardFields.map(({ input, label, hint }) => this.field(input, label, hint)))));
         this.schemeGroup.append(this.customGroup);
+        this.modelGroup = element('section', { class: 'wb-settings-body' },
+            element('div', { class: 'wb-api-model-row' }, this.field(this.modelSelect, '辅助模型'), this.refreshModelsButton),
+            this.field(this.model, '辅助模型 ID（可手动填写）'), this.autoModels, this.modelStatus);
         this.state = element('span', { class: 'wb-dirty-status', role: 'status' });
         this.discardButton = button('放弃修改', { onclick: () => this.discard() });
         this.save = button('保存 API 设置', { kind: 'primary', onclick: () => workbench.run(() => this.apply()) });
@@ -136,7 +175,7 @@ export class APISettingsUI {
             element('p', { class: 'wb-help', text: '世界书目录筛选、AI 整理和模型列表都使用酒馆后端转发，不切换正文连接。' }),
             element('div', { class: 'wb-api-toolbar' }, this.field(this.profile, '当前 API 方案'),
                 element('div', { class: 'wb-api-scheme-actions' }, this.addButton, this.deleteButton)),
-            this.schemeGroup, this.mainSummary,
+            this.schemeGroup, this.mainSummary, this.modelGroup,
             this.field(this.timeout, '等待上限（秒）', '限制生成前调度的总等待时间，也用于单次辅助请求与模型列表获取。'),
             element('p', { class: 'wb-help', text: '新增、删除和修改方案后，点击保存 API 设置生效。' }));
         form.addEventListener('submit', event => { event.preventDefault(); workbench.run(() => this.apply()); });
@@ -161,32 +200,47 @@ export class APISettingsUI {
             this.profile.append(element('option', { value: selected, text: '所选连接已失效（请重新选择）' }));
         }
         this.profile.value = selected;
+        if (this.followsMain) this.renderModels();
     }
 
     renderScheme() {
         this.cancelModelFetch();
         const scheme = this.scheme;
+        const custom = scheme?.source === 'custom';
         this.schemeGroup.hidden = !scheme;
-        this.customGroup.hidden = !scheme || scheme.source !== 'custom';
-        this.mainSummary.hidden = Boolean(scheme && scheme.source === 'custom');
+        this.customGroup.hidden = !custom;
+        this.mainSummary.hidden = custom;
+        this.modelGroup.hidden = !this.modelTarget;
+        this.autoModels.hidden = !custom;
         this.name.value = scheme?.name || '';
         this.source.value = scheme?.source || 'main';
         this.url.value = scheme?.url || '';
         this.key.value = scheme?.apiKey || '';
-        this.model.value = scheme?.model || '';
+        this.model.value = this.auxiliaryModel;
+        this.model.placeholder = this.followsMain ? '留空跟随酒馆正文模型' : '选择模型，或手动填写模型 ID';
         for (const { key, input } of this.forwardFields) input.value = scheme?.[key] || '';
         this.timeout.value = this.draft.timeoutSeconds ?? '';
-        this.modelStatus.textContent = scheme?.models.length ? `已有 ${scheme.models.length} 个模型，可以重新获取。` : '填写 API 地址后自动获取模型列表，也可以手动填写模型 ID。';
+        this.modelStatus.textContent = this.followsMain ? '选填。可以使用酒馆已有的模型选项，也可以手动填写。只影响当前方案。'
+            : scheme?.models.length ? `已有 ${scheme.models.length} 个模型，可以重新获取。` : '填写 API 地址后自动获取模型列表，也可以手动填写模型 ID。';
         this.renderModels();
     }
 
     renderModels() {
-        const scheme = this.scheme;
-        const models = scheme?.models || [];
-        this.modelSelect.replaceChildren(element('option', { value: '', text: models.length ? '选择模型' : '尚未获取模型列表' }),
+        let models = this.scheme?.models || [];
+        let bodyModel = '';
+        if (this.followsMain) {
+            const context = this.workbench.getContext();
+            bodyModel = nativeModelId(context);
+            const cache = this.mainModelList;
+            models = cache && sameValue(cache.route, mainAPIStatusData(context)) ? cache.models : nativeModelOptions(context);
+        }
+        const placeholder = this.followsMain ? `跟随正文模型${bodyModel ? `（${bodyModel}）` : ''}`
+            : models.length ? '选择模型' : '尚未获取模型列表';
+        this.modelSelect.replaceChildren(element('option', { value: '', text: placeholder }),
             ...models.map(id => element('option', { value: id, text: id })));
-        if (scheme?.model && !models.includes(scheme.model)) this.modelSelect.append(element('option', { value: scheme.model, text: `当前模型：${scheme.model}` }));
-        this.modelSelect.value = scheme?.model || '';
+        const model = this.auxiliaryModel.trim();
+        if (model && !models.includes(model)) this.modelSelect.append(element('option', { value: model, text: `当前选择：${model}` }));
+        this.modelSelect.value = model;
     }
 
     queueModels() {
@@ -214,21 +268,33 @@ export class APISettingsUI {
 
     async fetchModels({ automatic = false } = {}) {
         const scheme = this.scheme;
-        if (!scheme || scheme.source !== 'custom') throw new Error('请选择一个自定义 API 方案。');
+        const followsMain = this.followsMain;
+        if (!followsMain && scheme?.source !== 'custom') throw new Error('请选择酒馆主连接或自定义 API 方案。');
         if (!automatic && this.locked) throw new Error('先完成当前请求或原书保存。');
-        const snapshot = clone(scheme);
+        const context = this.workbench.getContext();
+        const route = followsMain ? mainAPIStatusData(context) : null;
+        const snapshot = followsMain ? null : clone(scheme);
         this.cancelModelFetch();
         const request = ++this.modelRequest;
-        this.lastModelFetch = JSON.stringify([scheme.id, scheme.url, scheme.apiKey, scheme.forwardHeaders]);
+        if (!followsMain) this.lastModelFetch = JSON.stringify([scheme.id, scheme.url, scheme.apiKey, scheme.forwardHeaders]);
         const controller = new AbortController();
         this.modelController = controller;
         this.fetching = true; this.modelStatus.textContent = '正在获取模型列表…'; this.update();
         try {
             const timeout = Number.isInteger(this.draft.timeoutSeconds) && this.draft.timeoutSeconds >= 10 && this.draft.timeoutSeconds <= 180
                 ? this.draft.timeoutSeconds : this.director.config.timeoutSeconds;
-            const models = await fetchAPIModels(this.workbench.getContext(), snapshot, timeout, controller.signal);
-            if (request !== this.modelRequest || this.scheme !== scheme) return;
-            scheme.models = models; this.renderModels();
+            const models = followsMain ? await fetchMainAPIModels(context, timeout, controller.signal)
+                : await fetchAPIModels(context, snapshot, timeout, controller.signal);
+            if (request !== this.modelRequest || this.scheme !== scheme || this.followsMain !== followsMain) return;
+            if (followsMain) {
+                if (!sameValue(route, mainAPIStatusData(this.workbench.getContext()))) {
+                    this.renderModels();
+                    this.modelStatus.textContent = '酒馆主连接已改变，请重新获取模型列表。';
+                    return;
+                }
+                this.mainModelList = { route, models };
+            } else scheme.models = models;
+            this.renderModels();
             this.modelStatus.textContent = `已获取 ${models.length} 个模型。选择后保存 API 设置。`;
         } catch (error) {
             if (request !== this.modelRequest) return;
@@ -272,16 +338,21 @@ export class APISettingsUI {
             this.refreshProfiles(); this.renderScheme();
         }
         const scheme = this.scheme;
-        const custom = Boolean(scheme && scheme.source === 'custom');
+        const custom = scheme?.source === 'custom';
+        const context = this.workbench.getContext();
+        const canUseMain = this.followsMain && context.mainApi === 'openai';
+        const canFetchMain = canUseMain && Boolean(mainAPIStatusData(context));
         this.profile.disabled = this.locked;
         this.timeout.disabled = this.locked;
         this.addButton.disabled = this.locked;
         this.deleteButton.disabled = this.locked || !scheme;
         this.name.disabled = this.locked || !scheme;
         this.source.disabled = this.locked || !scheme;
-        for (const input of [this.url, this.key, this.model, ...this.forwardFields.map(field => field.input)]) input.disabled = this.locked || !custom;
-        this.modelSelect.disabled = this.locked || !custom || !scheme.models.length;
-        this.refreshModelsButton.disabled = this.locked || !custom || this.fetching;
+        for (const input of [this.url, this.key, ...this.forwardFields.map(field => field.input)]) input.disabled = this.locked || !custom;
+        this.model.disabled = this.locked || (!custom && !canUseMain);
+        this.modelSelect.disabled = this.model.disabled || (custom && !scheme.models.length);
+        this.refreshModelsButton.hidden = this.followsMain && !canFetchMain;
+        this.refreshModelsButton.disabled = this.locked || this.fetching || (!custom && !canFetchMain);
         this.autoModels.disabled = this.locked || !custom;
         this.autoModels.setAttribute('aria-checked', String(scheme?.autoModels !== false));
         this.save.disabled = this.locked || !this.dirty;
@@ -289,17 +360,14 @@ export class APISettingsUI {
         this.state.textContent = this.dirty ? '有未保存的设置' : '已保存';
         this.state.dataset.dirty = String(this.dirty);
         if (!custom) {
-            const context = this.workbench.getContext();
             if (this.draft.apiMode === 'profile') {
                 const option = [...this.profile.options].find(value => value.value === this.profile.value);
                 this.mainSummary.textContent = `使用酒馆已有连接：${option?.textContent || '所选连接已失效'}。`;
-            } else {
-                let model = '';
-                try { model = context.getChatCompletionModel(context.chatCompletionSettings) || ''; } catch { /* A non-chat-completion connection has no such model. */ }
-                this.mainSummary.textContent = context.mainApi === 'openai'
-                    ? `跟随酒馆主连接，当前模型：${model || '尚未选择模型'}。主连接修改后会自动跟随。`
+            } else if (this.followsMain) {
+                this.mainSummary.textContent = canUseMain
+                    ? `复用酒馆主连接。正文模型：${nativeModelId(context) || '尚未选择'}；辅助模型：${this.auxiliaryModel.trim() || '跟随正文'}。`
                     : '当前主连接不是聊天补全。请切换酒馆主连接，或选择一个独立 API 方案。';
-            }
+            } else this.mainSummary.textContent = '所选 API 方案已失效，请重新选择。';
         }
         this.workbench.scrollbars?.refresh();
     }
@@ -320,7 +388,8 @@ export class APISettingsUI {
         if (this.draft.apiMode === 'scheme' && !apiSchemes.some(value => value.id === this.draft.apiSchemeId)) throw new Error('所选方案已不存在，请重新选择。');
         this.cancelModelFetch();
         this.director.updateSettings({
-            ...apiSelectionPatch(this.profile.value), timeoutSeconds, apiSchemes: normalizeAPISchemes(apiSchemes),
+            ...apiSelectionPatch(this.profile.value), timeoutSeconds, mainModel: this.draft.mainModel,
+            apiSchemes: normalizeAPISchemes(apiSchemes),
         });
         this.baseline = this.savedSettings(); this.draft = clone(this.baseline);
         this.refreshProfiles(); this.renderScheme(); this.update(); this.queueModels();

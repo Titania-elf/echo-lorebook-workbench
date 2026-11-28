@@ -109,7 +109,49 @@ export function customAPIData(scheme, { statusOnly = false } = {}) {
     return data;
 }
 
+// SillyTavern uses the options in its connection panel rather than /status for these sources.
+const NATIVE_MODEL_CHOICES = new Set(['claude', 'ai21', 'vertexai', 'perplexity', 'zai', 'minimax']);
+const STATUS_PROXY_SOURCES = new Set(['openai', 'mistralai', 'makersuite', 'deepseek', 'xai', 'moonshot']);
+
+export function mainAPIStatusData(context) {
+    const settings = context.chatCompletionSettings;
+    const source = settings?.chat_completion_source;
+    if (context.mainApi !== 'openai' || !source || NATIVE_MODEL_CHOICES.has(source)) return null;
+    const data = { chat_completion_source: source };
+    if (STATUS_PROXY_SOURCES.has(source) && settings.reverse_proxy) {
+        data.reverse_proxy = settings.reverse_proxy;
+        data.proxy_password = settings.proxy_password;
+    }
+    if (source === 'custom') {
+        if (!settings.custom_url) return null;
+        data.custom_url = settings.custom_url;
+        data.custom_include_headers = settings.custom_include_headers;
+    } else if (source === 'azure_openai') {
+        if (!settings.azure_base_url || !settings.azure_deployment_name) return null;
+        data.azure_base_url = settings.azure_base_url;
+        data.azure_deployment_name = settings.azure_deployment_name;
+        data.azure_api_version = settings.azure_api_version;
+    } else if (source === 'siliconflow') {
+        data.siliconflow_endpoint = settings.siliconflow_endpoint;
+    } else if (source === 'workers_ai') {
+        data.workers_ai_account_id = settings.workers_ai_account_id;
+    }
+    // No independent secret override: the host resolves the active credential of its main connection.
+    return data;
+}
+
 export async function fetchAPIModels(context, scheme, timeoutSeconds = 60, parentSignal) {
+    if (parentSignal?.aborted) throw parentSignal.reason;
+    return fetchStatusModels(context, customAPIData(scheme, { statusOnly: true }), timeoutSeconds, parentSignal, apiKeyFor(scheme));
+}
+
+export async function fetchMainAPIModels(context, timeoutSeconds = 60, parentSignal) {
+    const data = mainAPIStatusData(context);
+    if (!data) throw new Error('当前主连接没有可刷新的模型列表，请从酒馆已有选项选择或手动填写模型 ID。');
+    return fetchStatusModels(context, data, timeoutSeconds, parentSignal);
+}
+
+async function fetchStatusModels(context, data, timeoutSeconds, parentSignal, secret) {
     const controller = new AbortController();
     const onAbort = () => controller.abort(parentSignal.reason || new Error('模型列表获取已取消。'));
     parentSignal?.addEventListener('abort', onAbort, { once: true });
@@ -117,8 +159,7 @@ export async function fetchAPIModels(context, scheme, timeoutSeconds = 60, paren
     const timer = setTimeout(() => controller.abort(new Error('获取模型列表超时，请检查地址或稍后重试。')), timeoutSeconds * 1000);
     try {
         if (controller.signal.aborted) throw controller.signal.reason;
-        const data = customAPIData(scheme, { statusOnly: true });
-        const result = await requestTavernBackend(context, 'status', data, controller.signal, { secret: apiKeyFor(scheme) });
+        const result = await requestTavernBackend(context, 'status', data, controller.signal, { secret });
         if (controller.signal.aborted) throw controller.signal.reason;
         const list = Array.isArray(result) ? result : Array.isArray(result?.data) ? result.data : result?.models;
         if (!Array.isArray(list)) throw new Error('此 API 未返回可用的模型列表，可以手动填写模型 ID。');

@@ -33,6 +33,7 @@ async function loadRelay({ createGenerationParameters = unexpected, fetch = unex
     return {
         requestModel: transport.namespace.requestModel,
         fetchAPIModels: dependencies.get('./api-connections.js').namespace.fetchAPIModels,
+        fetchMainAPIModels: dependencies.get('./api-connections.js').namespace.fetchMainAPIModels,
     };
 }
 
@@ -123,6 +124,40 @@ test('current connection clones settings and preserves native reverse proxy and 
     assert.equal(sent.stream, false);
     assert.equal(sent.n, 1);
     for (const field of ['tools', 'stop', 'logit_bias']) assert.equal(sent[field], undefined);
+});
+
+test('default and named main connections can select separate models without changing host settings', async () => {
+    const sent = [];
+    const { requestModel } = await loadRelay({
+        createGenerationParameters: async (settings, model) => ({ generate_data: { model, custom_url: settings.custom_url } }),
+        fetch: async (_path, options) => { sent.push(JSON.parse(options.body)); return response(completion('{}')); },
+    });
+    const settings = { chat_completion_source: 'custom', custom_url: 'http://127.0.0.1:8001/v1', custom_model: 'body-model' };
+    const context = { mainApi: 'openai', chatCompletionSettings: settings, getChatCompletionModel: value => value.custom_model, getRequestHeaders };
+    const named = { id: 'reuse', name: 'reuse main', source: 'main', model: 'old-custom-model' };
+    const root = { ...config, mainModel: 'root-auxiliary' };
+    const namedConfig = selection => ({ ...customConfig(selection), mainModel: root.mainModel });
+    for (const options of [root, namedConfig({ ...named, mainModel: 'scheme-auxiliary' }), namedConfig(named)]) {
+        await requestModel(context, options, messages, new AbortController().signal);
+    }
+    assert.deepEqual(sent.map(item => item.model), ['root-auxiliary', 'scheme-auxiliary', 'body-model']);
+    assert.ok(sent.every(item => item.custom_url === settings.custom_url));
+    assert.equal(settings.custom_model, 'body-model');
+});
+
+test('main connection model lists use its native custom address and headers without overriding credentials', async () => {
+    let sent;
+    const { fetchMainAPIModels } = await loadRelay({ fetch: async (path, options) => {
+        assert.equal(path, '/api/backends/chat-completions/status');
+        sent = JSON.parse(options.body);
+        return response({ data: [{ id: 'body-model' }, { id: 'aux-model' }] });
+    } });
+    const settings = { chat_completion_source: 'custom', custom_url: 'http://127.0.0.1:8000/v1',
+        custom_include_headers: 'X-Local: preserved', custom_include_body: 'foo: bar', custom_model: 'body-model' };
+    const context = { mainApi: 'openai', chatCompletionSettings: settings, getRequestHeaders };
+    assert.equal((await fetchMainAPIModels(context)).join(','), 'aux-model,body-model');
+    assert.deepEqual(sent, { chat_completion_source: 'custom', custom_url: settings.custom_url,
+        custom_include_headers: settings.custom_include_headers });
 });
 
 test('saved profiles leave provider, connection and prompt options to the host service', async () => {

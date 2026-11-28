@@ -26,7 +26,7 @@ export function historyConnectionInfo(context = {}, config = {}) {
         if (!scheme) return { schemeName: '已失效的 API 方案', model: '' };
         return {
             schemeName: text(scheme.name) || '未命名 API 方案',
-            model: scheme.source === 'main' ? mainModel : text(scheme.model),
+            model: scheme.source === 'main' ? text(scheme.mainModel).trim() || mainModel : text(scheme.model),
         };
     }
     if (config.apiMode === 'profile' || (!config.apiMode && config.profileId)) {
@@ -37,7 +37,7 @@ export function historyConnectionInfo(context = {}, config = {}) {
         } catch { /* Keep the failed attempt record when a saved connection is unavailable. */ }
         return { schemeName: text(profile?.name) || '酒馆已有连接', model: text(profile?.model) };
     }
-    return { schemeName: '跟随酒馆主连接', model: mainModel };
+    return { schemeName: '跟随酒馆主连接', model: text(config.mainModel).trim() || mainModel };
 }
 
 /** Keep only the names captured for this request, with blue and green kept separate. */

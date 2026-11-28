@@ -11,7 +11,7 @@ export const EXTENSION_FOLDER = decodeURIComponent(new URL('../../', import.meta
 export const DEFAULTS = Object.freeze({
     enabled: false, books: [], profileId: '', maxEntries: 8, tokenBudget: 1800,
     recentMessages: 3, timeoutSeconds: 60,
-    apiMode: 'main', apiSchemeId: '', apiSchemes: [],
+    apiMode: 'main', apiSchemeId: '', mainModel: '', apiSchemes: [],
     promptTemplates: normalizePromptTemplates(), promptRoleVersion: 2,
 });
 
@@ -31,6 +31,7 @@ export function settingsWithDefaults(value = {}) {
         apiMode: ['main', 'scheme', 'profile'].includes(value.apiMode) ? value.apiMode
             : typeof value.profileId === 'string' && value.profileId ? 'profile' : 'main',
         apiSchemeId: typeof value.apiSchemeId === 'string' ? value.apiSchemeId : '',
+        mainModel: typeof value.mainModel === 'string' ? value.mainModel.trim() : '',
         apiSchemes: normalizeAPISchemes(value.apiSchemes),
         maxEntries: integer('maxEntries', 1, 30), tokenBudget: integer('tokenBudget', 128, 16000),
         recentMessages: integer('recentMessages', 1, 30),
@@ -52,6 +53,7 @@ export function normalizeAPISchemes(values) {
         url: typeof value.url === 'string' ? value.url : '',
         apiKey: typeof value.apiKey === 'string' ? value.apiKey : '',
         model: typeof value.model === 'string' ? value.model : '',
+        mainModel: typeof value.mainModel === 'string' ? value.mainModel.trim() : '',
         forwardHeaders: typeof value.forwardHeaders === 'string' ? value.forwardHeaders : '',
         forwardBody: typeof value.forwardBody === 'string' ? value.forwardBody : '',
         forwardExclude: typeof value.forwardExclude === 'string' ? value.forwardExclude : '',
