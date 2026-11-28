@@ -1,4 +1,4 @@
-import { WORKBENCH_SETTINGS, clone, sameValue, contextKey } from './workbench-state.js';
+import { WORKBENCH_SETTINGS, clone, sameValue, contextKey } from '../workbench/workbench-state.js';
 
 export const CATEGORY_ALL = 'all';
 export const CATEGORY_CONSTANT = 'constant';
@@ -42,6 +42,17 @@ function writeMetadata(data, apply) {
         const mirror = data.originalData.extensions?.[WORKBENCH_SETTINGS];
         if (mirror == null || object(mirror)) apply(namespace(data.originalData));
     }
+}
+
+export function writeBookOrganization(data, { categories, entryCategories, organization }) {
+    writeMetadata(data, values => {
+        if (values.organization != null && (!object(values.organization) || values.organization.version !== organization.version)) {
+            throw new Error('现有整理目录格式不兼容，未覆盖原始数据。');
+        }
+        values.categories = clone(categories);
+        values.entryCategories = clone(entryCategories);
+        values.organization = clone(organization);
+    });
 }
 
 export function validateCategoryName(value) {

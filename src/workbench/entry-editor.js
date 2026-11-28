@@ -1,6 +1,6 @@
 import { element, button, icon, displayText } from './workbench-utils.js';
 import { contextKey, clone } from './workbench-state.js';
-import { bookCategories } from './book-categories.js';
+import { bookCategories } from '../worldbook/book-categories.js';
 import { scrollRegion } from './workbench-scroll.js';
 
 /** Builds the editor once per session; status updates never replace the form. */
@@ -426,7 +426,7 @@ export class EntryEditor {
         }
         this.workbench.updateOverride(this.overrideHost, session.book, session.uid, session.context);
         const directory = this.workbench.entryDirectory(session.book, session.baseline);
-        this.summaryText.textContent = session.isNew ? '保存后生成本地目录；AI 概括需要单独操作。' :
+        this.summaryText.textContent = session.isNew ? '新条目需保存后再整理整本书，才能进入调度目录。' :
             `${directory.kind}：${directory.text}${this.store.dirty ? '（草稿尚未保存，目录只参考已保存版本。）' : ''}`;
     }
 }

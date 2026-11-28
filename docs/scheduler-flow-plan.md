@@ -1,4 +1,6 @@
-# 剧情导演与全文资料调度方案
+# 剧情导演与全文资料调度方案（历史）
+
+> 本文记录旧版方案。当前版本已移除剧情规划，改用世界书整理后的目录调度；以 README 的使用说明为准。
 
 本方案落实已确定的职责：调度器担任幕后剧情导演兼设定统筹，完整决定下一次回复的唯一主方向、节点顺序和收束；正文模型负责语言、对白、动作、心理描写及表现节奏，不再另开剧情分支。导演可以在既有设定范围内适度主动推进、引入有因果依据的新事件，但不能编造关键设定、替用户作决定或提前揭露角色未知的秘密。
 
@@ -48,9 +50,9 @@
 
 ## 修改范围与本次边界
 
-- `core.js`、`reply-plan.js`：最新用户输入、方案协议、依赖与预算顺序、执行指导。
-- `director.js`、`scheduler-native.js`、`native-adapter.js`：一轮生命周期、来源／扫描接管、深度 0 注入、构造确认与撤销。
-- `prompt-templates.js`、`prompt-settings-ui.js`：身份与协议拆分、数据宏、旧默认迁移及帮助。
+- `src/scheduler/core.js`、`src/scheduler/reply-plan.js`：最新用户输入、方案协议、依赖与预算顺序、执行指导。
+- `src/scheduler/director.js`、`src/scheduler/scheduler-native.js`、`src/worldbook/native-adapter.js`：一轮生命周期、来源／扫描接管、深度 0 注入、构造确认与撤销。
+- `src/scheduler/prompt-templates.js`、`src/workbench/prompt-settings-ui.js`：身份与协议拆分、数据宏、旧默认迁移及帮助。
 - 调度结果、历史存储／展示、对应样式及 API 页面说明与 README 同步更新。
 
 用户要求本次先不运行测试。只进行文件阅读、搜索、代码修改和只读的修改内容检查；未运行针对性测试、全量回归、语法／lint／构建／配置检查、浏览器或真实 API 验证。实现说明不代表端到端验证已经通过。

@@ -1,4 +1,4 @@
-export const assetUrl = name => new URL(`./assets/${name}`, import.meta.url).href;
+export const assetUrl = name => new URL(`../../assets/${name}`, import.meta.url).href;
 
 export function displayText(value) {
     if (value === null || value === undefined) return '';

@@ -1,15 +1,17 @@
-import { MODULE, EXTENSION_FOLDER, entryId, sourceFingerprint } from './core.js';
+import { MODULE, EXTENSION_FOLDER, entryId } from '../scheduler/core.js';
 import { contextKey } from './workbench-state.js';
 import { element, button, icon, badge, assetUrl, entryTitle, displayText, errorView, SheetController } from './workbench-utils.js';
 import { EntryEditor } from './entry-editor.js';
 import { SchedulerUI } from './scheduler-ui.js';
 import { APISettingsUI } from './api-settings-ui.js';
 import { PromptSettingsUI } from './prompt-settings-ui.js';
-import { SchedulerHistoryUI } from './scheduler-history-ui.js';
-import { BookCategoryStore, bookCategories, entryCategory, categoryName, CATEGORY_ALL, CATEGORY_CONSTANT } from './book-categories.js';
+import { OrganizerUI } from './organizer-ui.js';
+import { SchedulerHistoryUI } from '../history/scheduler-history-ui.js';
+import { BookCategoryStore, bookCategories, entryCategory, categoryName, CATEGORY_ALL, CATEGORY_CONSTANT } from '../worldbook/book-categories.js';
+import { organizationMetadata, organizationSummary, readOrganizationIndex } from '../worldbook/organization-index.js';
 import { WorkbenchScrollbars, scrollRegion } from './workbench-scroll.js';
-import { copyText } from '../../../utils.js';
-import { isMobile } from '../../../RossAscends-mods.js';
+import { copyText } from '../../../../../utils.js';
+import { isMobile } from '../../../../../RossAscends-mods.js';
 
 const FILTERS = [
     ['all', '全部状态'],
@@ -22,12 +24,13 @@ const FILTERS = [
 const PAGE_TITLES = {
     library: '世界书列表', entries: '条目列表', editor: '条目编辑',
     create: '新增条目', scheduler: '调度器', history: '调度历史',
-    api: '调度器 API 设置', prompts: '提示词管理', loading: '正在读取',
+    api: '调度器 API 设置', prompts: '提示词管理', organizer: '整理世界书', loading: '正在读取',
 };
 
 export class WorldbookWorkbench {
-    constructor({ getContext, director, api, store, settings, history = director.history }) {
-        Object.assign(this, { getContext, director, api, store, settings, history });
+    constructor({ getContext, director, api, store, settings, organizer, history = director.history }) {
+        Object.assign(this, { getContext, director, api, store, settings, history, organizer });
+        this.organizationIndices = new WeakMap();
         this.root = null;
         this.popup = null;
         this.opening = null;
@@ -67,6 +70,7 @@ export class WorldbookWorkbench {
         });
         this.unloadHandler = event => {
             if (!this.store.dirty && !this.store.session?.pending && !this.categories.pending
+                && !this.organizerUI?.draft?.pending && !this.organizerUI?.saving
                 && !this.scheduler?.dirty && !this.apiSettings?.dirty && !this.promptSettings?.dirty) return;
             event.preventDefault(); event.returnValue = '';
         };
@@ -84,6 +88,22 @@ export class WorldbookWorkbench {
     }
 
     bookInfo(name) { return this.books.find(book => book.name === name); }
+
+    organizationDirectory(data) {
+        if (!data) return null;
+        if (!this.organizationIndices.has(data)) this.organizationIndices.set(data, readOrganizationIndex(data));
+        return this.organizationIndices.get(data);
+    }
+
+    openOrganizer(book) {
+        if (!this.root || this.store.busy) return;
+        this.rememberView();
+        this.organizerUI ||= new OrganizerUI(this);
+        this.organizerUI.open(book);
+        this.tab = 'entries';
+        this.workspaceView = 'organizer';
+        this.mountPage('organizer', this.organizerUI.view, { actions: this.organizerUI.actions });
+    }
 
     applyTheme() {
         const theme = this.settings.theme;
@@ -277,6 +297,7 @@ export class WorldbookWorkbench {
         if (this.popup !== popup) return;
         ++this.request; ++this.directoryRequest;
         this.readController?.abort();
+        this.organizerUI?.cancel();
         clearTimeout(this.toastTimer); clearTimeout(this.searchTimer);
         window.visualViewport?.removeEventListener('resize', this.viewportHandler);
         window.visualViewport?.removeEventListener('scroll', this.viewportHandler);
@@ -390,6 +411,7 @@ export class WorldbookWorkbench {
         this.tab = tab;
         if (tab === 'entries') {
             if (['editor', 'create'].includes(this.workspaceView) && this.store.session) this.renderEditor();
+            else if (this.workspaceView === 'organizer' && this.currentBook) this.openOrganizer(this.currentBook);
             else if (this.workspaceView === 'entries' && this.currentBook) {
                 if (this.store.loaded.has(this.currentBook)) this.renderEntries();
                 else await this.selectBook(this.currentBook);
@@ -533,11 +555,14 @@ export class WorldbookWorkbench {
         this.listNotice = element('div', { class: 'wb-draft-notices' });
         this.listViewport = element('div', { class: 'wb-browse-content', tabIndex: 0 }, this.list);
         this.listViewport.addEventListener('scroll', () => { this.listScroll = this.listViewport.scrollTop; }, { passive: true });
+        this.bookDirectoryNode = element('span', { class: 'wb-help' });
         const toolbar = element('div', { class: 'wb-browse-toolbar' },
             element('div', { class: 'wb-book-source-row' },
                 button('世界书列表', { glyph: 'back', onclick: () => this.renderLibrary() }),
                 element('div', { class: 'wb-option-main' }, element('strong', { text: this.currentBook }), this.bookSourceNode)),
             element('div', { class: 'wb-browse-search' }, element('div', { class: 'wb-search' }, icon('search'), search, this.clearSearch), create),
+            element('div', { class: 'wb-book-organize-controls' },
+                button('整理当前世界书', { glyph: 'layers', onclick: () => this.run(() => this.openOrganizer(targetBook)) }), this.bookDirectoryNode),
             filters, this.categoryStrip, this.listNotice);
         this.mountPage('entries', element('section', { class: 'wb-feature-view' }, toolbar,
             scrollRegion(this.listViewport, 'wb-fill-scroll'), this.pager));
@@ -579,21 +604,24 @@ export class WorldbookWorkbench {
     recordMatches(record) {
         const entry = record.entry;
         const id = entryId({ world: this.currentBook, uid: record.key });
-        const overrides = this.director.state().overrides;
         const data = this.store.loaded.get(this.currentBook);
         if (this.categoryFilter === CATEGORY_CONSTANT && !entry.constant) return false;
         if (![CATEGORY_ALL, CATEGORY_CONSTANT].includes(this.categoryFilter) && entryCategory(data, record.key) !== this.categoryFilter) return false;
         if (this.filter === 'enabled' && entry.disable) return false;
         if (this.filter === 'actual' && !this.lastActual.has(id)) return false;
-        if (this.filter === 'pin' && overrides[id] !== 'pin') return false;
-        if (this.filter === 'exclude' && overrides[id] !== 'exclude') return false;
+        if (['pin', 'exclude'].includes(this.filter)) {
+            const ancestors = this.organizationDirectory(data)?.get(record.key)?.ancestors || [];
+            if (this.director.overrideMode(id, ancestors) !== this.filter) return false;
+        }
         if (this.filter === 'disabled' && !entry.disable) return false;
         const query = this.query.trim().toLocaleLowerCase();
         if (!query) return true;
         let text = this.textIndex.get(entry);
         if (text === undefined) {
+            const card = this.organizationDirectory(data)?.get(record.key);
             text = [entry.comment, Array.isArray(entry.key) ? entry.key.map(displayText).join(' ') : entry.key,
-                Array.isArray(entry.keysecondary) ? entry.keysecondary.map(displayText).join(' ') : entry.keysecondary, entry.content].map(displayText).join(' ').toLocaleLowerCase();
+                Array.isArray(entry.keysecondary) ? entry.keysecondary.map(displayText).join(' ') : entry.keysecondary,
+                card?.category, card?.summary, entry.content].map(displayText).join(' ').toLocaleLowerCase();
             this.textIndex.set(entry, text);
         }
         return text.includes(query);
@@ -604,6 +632,9 @@ export class WorldbookWorkbench {
         const scroll = this.listViewport.scrollTop;
         const all = this.store.entries(this.currentBook);
         const data = this.store.loaded.get(this.currentBook);
+        const directory = this.organizationDirectory(data);
+        if (this.bookDirectoryNode) this.bookDirectoryNode.textContent = directory ? '调度目录已就绪'
+            : organizationMetadata(data) ? '目录过期 · 使用原生触发' : '未整理 · 使用原生触发';
         const matches = this.visibleRecords();
         const pages = Math.max(1, Math.ceil(matches.length / this.pageSize));
         this.page = Math.min(this.page, pages - 1);
@@ -616,11 +647,12 @@ export class WorldbookWorkbench {
                 element('p', { class: 'wb-help', text: all.length ? '换一个关键词，或清除当前筛选。' : '点击新增条目，进入单独的创建页。' }),
                 all.length ? button('清除筛选', { onclick: () => { this.query = ''; this.filter = 'all'; this.categoryFilter = CATEGORY_ALL; this.page = 0; this.renderEntries(); } }) : null));
         }
-        const overrides = this.director.state().overrides;
         let previousGroup = null;
         for (const record of matches.slice(this.page * this.pageSize, (this.page + 1) * this.pageSize)) {
             const entry = record.entry;
             const id = entryId({ world: this.currentBook, uid: record.key });
+            const card = directory?.get(record.key);
+            const mode = this.director.overrideMode(id, card?.ancestors || []);
             const badges = [];
             const category = entryCategory(data, record.key);
             const group = this.categoryFilter === CATEGORY_CONSTANT ? CATEGORY_CONSTANT : (categoryName(data, category) ? category : '');
@@ -633,13 +665,13 @@ export class WorldbookWorkbench {
             if (entry.constant) badges.push(badge('常驻 · 蓝灯'));
             else badges.push(badge(entry.vectorized ? '向量触发' : '绿灯 · 关键词'));
             if (categoryName(data, category)) badges.push(badge(categoryName(data, category)));
-            if (overrides[id] === 'pin') badges.push(badge('本聊天固定', 'pin'));
-            if (overrides[id] === 'exclude') badges.push(badge('本聊天排除', 'ban'));
+            if (mode === 'pin') badges.push(badge('本聊天固定', 'pin'));
+            if (mode === 'exclude') badges.push(badge('本聊天排除', 'ban'));
             if (this.lastActual.has(id)) badges.push(badge('最近构造接纳', 'check'));
-            const rawExcerpt = displayText(entry.content).replace(/\s+/g, ' ').slice(0, 500);
+            const excerpt = card?.summary || displayText(entry.content).replace(/\s+/g, ' ').slice(0, 500);
             const content = element('span', { class: 'wb-entry-main' },
                 element('span', { class: 'wb-entry-title' }, entryTitle(entry, record.key)),
-                element('span', { class: 'wb-excerpt', text: rawExcerpt || '暂无正文' }),
+                element('span', { class: 'wb-excerpt', text: excerpt || '暂无正文' }),
                 element('span', { class: 'wb-entry-meta' }, badges),
                 element('span', { class: 'wb-entry-keywords', text: `关键词：${Array.isArray(entry.key) ? entry.key.map(displayText).join('、') || '未填写' : displayText(entry.key) || '未填写'}` }));
             const book = this.currentBook;
@@ -1003,8 +1035,8 @@ export class WorldbookWorkbench {
                 if (!context.chatId || origin !== this.director.chatKey(context)) throw new Error('聊天已变化，请在当前聊天重新打开条目后设置规则。');
                 if (this.director.busy) throw new Error('先完成或取消当前辅助请求。');
                 if (value !== 'auto' && !this.director.catalog.some(item => item.id === id && item.kind === 'green')) throw new Error('固定／排除只用于当前可调度的绿灯条目。');
-                this.director.setOverride(id, value);
-                this.notify({ auto: '已恢复本聊天自动选择。', pin: '已设为本聊天固定，仍受预算限制。', exclude: '已设为本聊天排除，失败回退时无效。' }[value]);
+                this.director.setOverride(id, value, this.organizationDirectory(this.store.loaded.get(book))?.get(String(uid))?.ancestors || []);
+                this.notify({ auto: '已恢复本聊天自动选择。', pin: '已设为本聊天固定，仍受预算限制。', exclude: '已设为本聊天排除，原生触发时无效。' }[value]);
             }),
         }));
         host.append(segment, element('p', { class: 'wb-help', 'data-override-note': '' }));
@@ -1015,7 +1047,8 @@ export class WorldbookWorkbench {
         if (uid == null) return;
         const id = entryId({ world: book, uid });
         const context = this.getContext();
-        const mode = this.director.state().overrides[id] || 'auto';
+        const ancestors = this.organizationDirectory(this.store.loaded.get(book))?.get(String(uid))?.ancestors || [];
+        const mode = this.director.overrideMode(id, ancestors);
         const candidate = this.director.catalog.find(item => item.id === id);
         const eligible = candidate?.kind === 'green';
         const locked = !context.chatId || origin !== this.director.chatKey(context) || this.director.busy || this.store.busy;
@@ -1028,30 +1061,13 @@ export class WorldbookWorkbench {
         if (note) note.textContent = candidate?.kind === 'blue'
             ? '蓝灯默认常驻，不使用固定／排除。旧规则暂时保留，切回绿灯后仍生效，也可手动解除。'
             : eligible ? '固定绿灯优先，仍受绿灯数量与 Token 上限；排除仅在成功调度时生效。'
-                : '只有当前挂载、托管并符合条件的绿灯可以设置规则；已保存的旧规则仍可解除。';
+                : '只有已挂载、已托管且有有效目录的适用绿灯可以设置规则；已保存的旧规则仍可解除。';
     }
 
     entryDirectory(book, entry) {
-        const id = entryId({ world: book, uid: entry.uid });
-        const summary = this.director.config.summaries[id];
-        if (summary?.fingerprint === sourceFingerprint(entry) && typeof summary.text === 'string' && summary.text.trim()) return { kind: 'AI 概括', text: summary.text.slice(0, 400) };
+        const summary = organizationSummary(this.store.loaded.get(book), entry);
+        if (summary) return { kind: '目录摘要', text: summary };
         return { kind: '本地摘录', text: displayText(entry.content).replace(/\s+/g, ' ').slice(0, 240) || '暂无正文' };
-    }
-
-    async summarize() {
-        if (this.director.busy) throw new Error('先完成或取消当前辅助请求。');
-        const choice = await this.sheets.choose('生成 AI 目录？',
-            element('p', { class: 'wb-help', text: '会将新增或改动条目的原文发送给所选辅助模型，产生 API 用量。只生成用于展示的目录概括；调度筛选仍读取全文，不改写世界书正文。' }),
-            [{ label: '取消', value: 'cancel' }, { label: '调用 API 概括', value: 'summary', kind: 'primary' }]);
-        if (choice === 'summary') await this.director.summarize();
-    }
-
-    async clearScene() {
-        if (this.director.busy) throw new Error('先完成或取消当前辅助请求。');
-        const choice = await this.sheets.choose('清空场景记忆？',
-            element('p', { class: 'wb-help', text: '只清空本聊天场景工作集，不解除手动固定或排除。' }),
-            [{ label: '取消', value: 'cancel' }, { label: '清空场景记忆', value: 'clear', kind: 'primary' }]);
-        if (choice === 'clear') this.director.clearState();
     }
 
     themeSheet() {
@@ -1099,6 +1115,7 @@ export class WorldbookWorkbench {
         } else this.editor?.update();
         this.scheduler?.update(); this.apiSettings?.update(); this.promptSettings?.update(); this.historyUI?.update();
         if (this.view === 'entries') { this.renderCategories(); this.renderRows(); }
+        else if (this.view === 'organizer' && !this.organizerUI.saving && !this.organizerUI.job) this.organizerUI.render();
         else if (this.view === 'library') this.updateDraftNotices();
     }
 
@@ -1128,6 +1145,7 @@ export class WorldbookWorkbench {
     }
 
     onChatChanged() {
+        this.organizerUI?.contextChanged();
         this.actualContext = contextKey(this.getContext()); this.lastActual.clear();
         ++this.request; ++this.directoryRequest;
         if (!this.root) return;

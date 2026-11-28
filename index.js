@@ -1,15 +1,16 @@
 import { getContext } from '../../../extensions.js';
 import { getSortedEntries } from '../../../world-info.js';
-import { MODULE, EXTENSION_NAME, EXTENSION_FOLDER, settingsWithDefaults } from './core.js';
-import { LorebookDirector } from './director.js';
-import { requestModel } from './transport.js';
-import { NativeWorldbookAdapter } from './native-adapter.js';
-import { EntryStore } from './entry-store.js';
-import { WorkbenchSettings } from './workbench-state.js';
-import { WorldbookWorkbench } from './workbench.js';
-import { element } from './workbench-utils.js';
-import { showSchedulerWarning } from './scheduler-notice.js';
-import { SchedulerHistoryStore } from './scheduler-history-store.js';
+import { MODULE, EXTENSION_NAME, EXTENSION_FOLDER, settingsWithDefaults } from './src/scheduler/core.js';
+import { LorebookDirector } from './src/scheduler/director.js';
+import { requestModel } from './src/api/transport.js';
+import { NativeWorldbookAdapter } from './src/worldbook/native-adapter.js';
+import { EntryStore } from './src/worldbook/entry-store.js';
+import { BookOrganizer } from './src/worldbook/book-organizer.js';
+import { WorkbenchSettings } from './src/workbench/workbench-state.js';
+import { WorldbookWorkbench } from './src/workbench/workbench.js';
+import { element } from './src/workbench/workbench-utils.js';
+import { showSchedulerWarning } from './src/scheduler/scheduler-notice.js';
+import { SchedulerHistoryStore } from './src/history/scheduler-history-store.js';
 
 const native = new NativeWorldbookAdapter(getContext);
 const history = new SchedulerHistoryStore({ getContext });
@@ -24,14 +25,9 @@ jQuery(async () => {
     void history.initialize();
     const storedConfig = context.extensionSettings[MODULE];
     const normalizedConfig = settingsWithDefaults(storedConfig);
-    const storedSelector = storedConfig?.promptTemplates?.selector;
-    const selectorMigrated = Array.isArray(storedSelector)
-        && !storedSelector.some(entry => entry?.id === 'selector-protocol')
-        && normalizedConfig.promptTemplates.selector.some(entry => entry.id === 'selector-protocol');
-    const promptRolesMigrated = Boolean(storedConfig && storedConfig.promptRoleVersion !== normalizedConfig.promptRoleVersion);
+    const promptsMigrated = Boolean(storedConfig && storedConfig.promptRoleVersion !== normalizedConfig.promptRoleVersion);
     context.extensionSettings[MODULE] = normalizedConfig;
-    // Persist recognized template/role upgrades without backfilling user-deleted entries.
-    if (selectorMigrated || promptRolesMigrated) context.saveSettingsDebounced();
+    if (promptsMigrated) context.saveSettingsDebounced();
     const disabled = context.extensionSettings.disabledExtensions;
     if (Array.isArray(disabled)) {
         const aliases = new Set([MODULE, EXTENSION_NAME, EXTENSION_FOLDER,
@@ -50,7 +46,8 @@ jQuery(async () => {
         onBegin: () => director.invalidate('正在保存原世界书，旧调度选择已失效。'),
         onCommit: change => director.sourceSaved(change),
     });
-    const workbench = new WorldbookWorkbench({ getContext, director, api, store, settings, history });
+    const organizer = new BookOrganizer({ store, getContext, requestModel });
+    const workbench = new WorldbookWorkbench({ getContext, director, api, store, settings, history, organizer });
     const mountMenu = () => {
         const menu = document.getElementById('extensionsMenu');
         if (!menu || document.getElementById(`${MODULE}-menu`)) return Boolean(menu);
@@ -73,7 +70,6 @@ jQuery(async () => {
     eventSource.on(eventTypes.WORLDINFO_ENTRIES_LOADED, payload => director.onEntriesLoaded(payload));
     if (eventTypes.WORLDINFO_SCAN_DONE) eventSource.on(eventTypes.WORLDINFO_SCAN_DONE, args => director.onScanDone(args));
     eventSource.on(eventTypes.WORLD_INFO_ACTIVATED, entries => director.onActivated(entries));
-    if (eventTypes.CHAT_COMPLETION_PROMPT_READY) eventSource.on(eventTypes.CHAT_COMPLETION_PROMPT_READY, data => director.onChatCompletionReady(data));
     eventSource.on(eventTypes.GENERATE_AFTER_DATA, (...args) => director.onPromptReady(...args));
     eventSource.on(eventTypes.GENERATION_STOPPED, () => director.stopGeneration());
     eventSource.on(eventTypes.GENERATION_ENDED, () => director.endGeneration());

@@ -966,11 +966,7 @@
     padding-block: 8px;
 }
 
-#lorebook-director-workbench .wb-scene-text {
-    font-size: .9em;
-}
-
-#lorebook-director-workbench :is(.wb-status, .wb-result-reason, .wb-scene-header) {
+#lorebook-director-workbench :is(.wb-status, .wb-result-reason) {
     font-size: .82em;
 }
 

@@ -6,47 +6,12 @@
     padding-block: 4px 8px;
 }
 
-#lorebook-director-workbench .wb-field:has(> #wb-config-maxEntries, > #wb-config-tokenBudget, > #wb-config-replyPlanTokenBudget, > #wb-config-recentMessages) {
+#lorebook-director-workbench .wb-field:has(> #wb-config-maxEntries, > #wb-config-tokenBudget, > #wb-config-recentMessages) {
     grid-template-rows: minmax(1.4em, auto) auto max(38px, 2.4em);
 }
 
-#lorebook-director-workbench :is(#wb-config-maxEntries, #wb-config-tokenBudget, #wb-config-replyPlanTokenBudget, #wb-config-recentMessages) {
+#lorebook-director-workbench :is(#wb-config-maxEntries, #wb-config-tokenBudget, #wb-config-recentMessages) {
     grid-row: 3;
-}
-
-:is(#lorebook-director-workbench, .echo-workbench-popup) .wb-scene {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-    min-width: 0;
-    padding: 16px;
-    border-radius: 13px;
-    background: var(--wb-soft);
-    color: var(--wb-text);
-}
-
-:is(#lorebook-director-workbench, .echo-workbench-popup) .wb-scene-header {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-    min-width: 0;
-    font-size: 13px;
-    font-weight: 600;
-    line-height: 1.6;
-}
-
-:is(#lorebook-director-workbench, .echo-workbench-popup) .wb-scene-text {
-    max-width: var(--wb-reading-width);
-    min-width: 0;
-    margin: 0;
-    color: var(--wb-text);
-    font-size: 14px;
-    font-weight: 400;
-    line-height: 1.85;
-    white-space: pre-wrap;
-    overflow-wrap: anywhere;
 }
 
 :is(#lorebook-director-workbench, .echo-workbench-popup) .wb-result-heading {
@@ -63,7 +28,7 @@
     line-height: 1.7;
 }
 
-/* Returned plans share one quiet, read-only presentation in results and history. */
+/* Read-only presentation for reply plans stored by older versions. */
 :is(#lorebook-director-workbench, .echo-workbench-popup) .wb-reply-plan {
     display: flex;
     flex-direction: column;

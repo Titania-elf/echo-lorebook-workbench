@@ -1,4 +1,4 @@
-import { createGenerationParameters } from '../../../openai.js';
+import { createGenerationParameters } from '../../../../../openai.js';
 import { selectedAPIScheme, customAPIData } from './api-connections.js';
 
 /** Send directly through ST's backend, without Generate/quiet-prompt recursion or global setting changes. */

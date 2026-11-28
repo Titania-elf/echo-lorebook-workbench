@@ -1,9 +1,9 @@
-import { accountsEnabled, currentUser, getCurrentUserHandle } from '../../../user.js';
-import { replyPlanSnapshot } from './scheduler-report.js';
+import { accountsEnabled, currentUser, getCurrentUserHandle } from '../../../../../user.js';
+import { replyPlanSnapshot } from '../scheduler/scheduler-report.js';
 
 const RECORD_STORE = 'records';
 const RECORD_LIMIT = 100;
-const SERVER_ROOT = new URL('../../../../', import.meta.url).href;
+const SERVER_ROOT = new URL('../../../../../../', import.meta.url).href;
 const REQUEST_STATUSES = new Set(['pending', 'returned', 'failed', 'timeout', 'cancelled']);
 const VALIDATION_STATUSES = new Set(['pending', 'valid', 'invalid', 'not-run']);
 const APPLICATION_STATUSES = new Set(['pending', 'preview', 'waiting', 'applied', 'unused']);
@@ -12,9 +12,9 @@ const FINAL_REPLY_PLAN_STATUSES = new Set(['omitted', 'cancelled']);
 const REPLY_PLAN_FIELDS = ['replyPlan', 'replyPlanStatus', 'replyPlanReason', 'replyPlanTokens'];
 const STRING_FIELDS = [
     'chatKey', 'chatName', 'generationType', 'schemeName', 'model', 'rawResponse',
-    'error', 'errorStage', 'errorCode', 'applicationReason', 'replyPlanReason',
+    'error', 'errorStage', 'errorCode', 'applicationReason',
 ];
-const NUMBER_FIELDS = ['startedAt', 'submittedAt', 'responseReceivedAt', 'finishedAt', 'durationMs', 'replyPlanTokens'];
+const NUMBER_FIELDS = ['startedAt', 'submittedAt', 'responseReceivedAt', 'finishedAt', 'durationMs'];
 const COUNT_FIELDS = ['blueAvailable', 'fixedGreen', 'greenCandidates', 'selected', 'included'];
 const ENTRY_GROUP_FIELDS = ['plannedEntries', 'effectiveEntries'];
 const record = value => value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -60,9 +60,6 @@ function fields(value) {
     if (REQUEST_STATUSES.has(value.requestStatus)) result.requestStatus = value.requestStatus;
     if (VALIDATION_STATUSES.has(value.validationStatus)) result.validationStatus = value.validationStatus;
     if (APPLICATION_STATUSES.has(value.applicationStatus)) result.applicationStatus = value.applicationStatus;
-    if (REPLY_PLAN_STATUSES.has(value.replyPlanStatus)) result.replyPlanStatus = value.replyPlanStatus;
-    const plan = replyPlanSnapshot(value.replyPlan);
-    if (plan) result.replyPlan = plan;
     for (const key of ['lateResponse', 'durationUnknown', 'recovered']) {
         if (typeof value[key] === 'boolean') result[key] = value[key];
     }
@@ -80,8 +77,24 @@ function fields(value) {
     return result;
 }
 
-/** A final local plan decision cannot be rewritten by a late response or later cancellation. */
-function protectReplyPlan(previous, update) {
+const hasLegacyPlanFields = value => REPLY_PLAN_FIELDS.some(key => Object.hasOwn(value, key));
+
+/** Keep optional legacy data when reading or recovering old records; new requests have none. */
+function legacyPlanFields(value) {
+    const result = {};
+    if (REPLY_PLAN_STATUSES.has(value.replyPlanStatus)) result.replyPlanStatus = value.replyPlanStatus;
+    if (typeof value.replyPlanReason === 'string') result.replyPlanReason = value.replyPlanReason;
+    if (Number.isFinite(value.replyPlanTokens) && value.replyPlanTokens >= 0) result.replyPlanTokens = value.replyPlanTokens;
+    if (value.replyPlan) {
+        const plan = replyPlanSnapshot(value.replyPlan);
+        if (plan) result.replyPlan = plan;
+    }
+    return result;
+}
+
+/** A final legacy plan decision cannot be rewritten by a late response or later cancellation. */
+function protectLegacyPlan(previous, changes, update) {
+    if (record(changes)) Object.assign(update, legacyPlanFields(changes));
     const discard = () => { for (const key of REPLY_PLAN_FIELDS) delete update[key]; };
     const delivered = ['preview', 'injected'].includes(previous.replyPlanStatus);
     const applicationFinal = ['preview', 'applied', 'unused'].includes(previous.applicationStatus);
@@ -127,6 +140,7 @@ function storedRecord(value) {
         requestStatus: 'pending', validationStatus: 'pending', applicationStatus: 'pending',
         rawResponse: '', error: '', errorStage: '', applicationReason: '', lateResponse: false,
         ...data,
+        ...(hasLegacyPlanFields(value) ? legacyPlanFields(value) : {}),
         _ownerSession: typeof value._ownerSession === 'string' ? value._ownerSession : '',
         _revision: Number.isInteger(value._revision) && value._revision >= 0 ? value._revision : 0,
         _sealed: value._sealed === true || (data.requestStatus && data.requestStatus !== 'pending'),
@@ -228,7 +242,6 @@ export class SchedulerHistoryStore {
         const now = Date.now();
         const initial = fields(metadata);
         delete initial.effectiveEntries;
-        for (const key of REPLY_PLAN_FIELDS) delete initial[key];
         for (const key of ['submittedAt', 'responseReceivedAt', 'finishedAt', 'durationMs', 'durationUnknown', 'recovered']) {
             delete initial[key];
         }
@@ -239,7 +252,6 @@ export class SchedulerHistoryStore {
             chatKey: initial.chatKey || 'unknown',
             rawResponse: '', error: '', errorStage: '', errorCode: '', applicationReason: '', lateResponse: false,
             requestStatus: 'pending', validationStatus: 'pending', applicationStatus: 'pending',
-            replyPlanStatus: 'waiting', replyPlanReason: '',
             _ownerSession: this._sessionId, _revision: 1, _sealed: false,
         });
         this._pruneMemory();
@@ -274,7 +286,7 @@ export class SchedulerHistoryStore {
             if (['preview', 'applied', 'unused'].includes(previous.applicationStatus)
                 && update.applicationStatus !== previous.applicationStatus) delete update.applicationStatus;
         }
-        protectReplyPlan(previous, update);
+        if (hasLegacyPlanFields(previous)) protectLegacyPlan(previous, changes, update);
         if ((update.requestStatus ?? previous.requestStatus) !== 'returned'
             || (update.validationStatus ?? previous.validationStatus) !== 'valid'
             || (update.applicationStatus ?? previous.applicationStatus) !== 'applied') delete update.effectiveEntries;
@@ -299,7 +311,7 @@ export class SchedulerHistoryStore {
             ? update.requestStatus : previous.requestStatus !== 'pending'
                 ? previous.requestStatus : update.error ? 'failed' : 'returned';
         update.requestStatus = status;
-        protectReplyPlan(previous, update);
+        if (hasLegacyPlanFields(previous)) protectLegacyPlan(previous, changes, update);
         if (status !== 'returned' || (update.validationStatus ?? previous.validationStatus) !== 'valid'
             || (update.applicationStatus ?? previous.applicationStatus) !== 'applied') delete update.effectiveEntries;
         const finishedAt = update.finishedAt ?? Date.now();

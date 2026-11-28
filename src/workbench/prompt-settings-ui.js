@@ -5,7 +5,7 @@ import { PromptReorderController } from './prompt-reorder.js';
 import {
     PROMPT_TASKS, PROMPT_ROLES, PROMPT_MACROS,
     normalizePromptTemplates, defaultPromptEntries, validatePromptTemplates,
-} from './prompt-templates.js';
+} from '../scheduler/prompt-templates.js';
 
 const entryKey = (task, id) => JSON.stringify([task, id]);
 const taskLabel = id => PROMPT_TASKS.find(task => task.id === id)?.label || id;
@@ -54,10 +54,7 @@ export class PromptSettingsUI {
 
     build() {
         const workbench = this.workbench;
-        this.taskSelect = element('select', { id: 'wb-prompt-task', 'aria-label': '当前提示词任务' },
-            PROMPT_TASKS.map(task => element('option', { value: task.id, text: task.label })));
-        this.taskSelect.addEventListener('change', () => this.selectTask(this.taskSelect.value));
-        this.taskNote = element('p', { class: 'wb-help' });
+        const task = PROMPT_TASKS[0];
         this.helpButton = button('宏与提示词说明', {
             id: 'wb-prompt-help', iconOnly: true, glyph: 'help',
             onclick: () => this.openHelp(),
@@ -65,12 +62,12 @@ export class PromptSettingsUI {
         this.addButton = button('新增条目', {
             id: 'wb-prompt-add', glyph: 'plus', onclick: () => workbench.run(() => this.addEntry()),
         });
-        this.defaultsButton = button('恢复本任务默认', {
+        this.defaultsButton = button('恢复默认', {
             id: 'wb-prompt-defaults', onclick: () => workbench.run(() => this.restoreDefaults()),
         });
         this.entryCount = element('small', { class: 'wb-help' });
         this.entryList = element('div', {
-            id: 'wb-prompt-list', class: 'wb-prompt-list', role: 'group', 'aria-label': '当前任务的提示词条目',
+            id: 'wb-prompt-list', class: 'wb-prompt-list', role: 'group', 'aria-label': '目录筛选提示词条目',
         });
         this.entryList.addEventListener('keydown', event => {
             if (event.key !== 'Escape' || !this.expandedEntryKey) return;
@@ -145,8 +142,8 @@ export class PromptSettingsUI {
         const form = element('form', { class: 'wb-prompt-settings' },
             element('div', { class: 'wb-prompt-overview' },
                 element('div', { class: 'wb-prompt-heading' },
-                    this.field(this.taskSelect, '当前任务'), this.defaultsButton),
-                this.taskNote,
+                    element('div', { class: 'wb-field' }, element('h3', { text: task.label })), this.defaultsButton),
+                element('p', { class: 'wb-help', text: task.description }),
                 element('p', { class: 'wb-help', text: '按顺序发送已启用的条目。修改后点击保存生效。' })),
             this.problem, this.reorderStatus, element('div', { class: 'wb-prompt-grid' }, listPanel, editorPanel));
         form.addEventListener('submit', event => { event.preventDefault(); workbench.run(() => this.apply()); });
@@ -163,20 +160,6 @@ export class PromptSettingsUI {
             onReorder: move => this.reorderEntry(move),
             onAnnounce: message => { this.reorderStatus.textContent = message; },
         });
-    }
-
-    selectTask(task) {
-        if (!PROMPT_TASKS.some(value => value.id === task) || task === this.task) return;
-        this.reorder?.cancel();
-        this.expandedEntryKey = '';
-        this.rememberTextPosition();
-        if (this.entryList.getClientRects().length) this.listPositions.set(this.task, this.entryList.scrollTop);
-        if (this.compactLayout() && !this.mobileEditor) this.listPagePositions.set(this.task, this.viewport.scrollTop);
-        this.task = task;
-        this.mobileEditor = false;
-        this.renderTask();
-        this.update();
-        if (this.compactLayout()) this.viewport.scrollTop = this.listPagePositions.get(task) || 0;
     }
 
     selectEntry(id) {
@@ -229,8 +212,6 @@ export class PromptSettingsUI {
     }
 
     renderTask() {
-        this.taskSelect.value = this.task;
-        this.taskNote.textContent = PROMPT_TASKS.find(value => value.id === this.task)?.description || '';
         if (!this.entries.some(value => value.id === this.selected.get(this.task))) {
             this.selected.set(this.task, this.entries[0]?.id || '');
         }
@@ -480,7 +461,7 @@ export class PromptSettingsUI {
         this.rememberTextPosition();
         const task = this.task;
         const choice = await this.workbench.sheets.choose(`恢复“${taskLabel(task)}”的默认提示词？`,
-            element('p', { class: 'wb-help', text: '会替换当前任务的全部条目；另一任务的草稿会保留。点击保存后生效。' }),
+            element('p', { class: 'wb-help', text: '会替换全部筛选提示词条目。点击保存后生效。' }),
             [{ label: '保留当前内容', value: 'cancel' }, { label: '恢复默认', value: 'restore', kind: 'primary' }]);
         if (choice !== 'restore' || this.locked || this.task !== task) return;
         this.draft[task] = defaultPromptEntries(task);
@@ -567,49 +548,30 @@ export class PromptSettingsUI {
         this.rememberTextPosition();
         const table = element('table', { class: 'wb-prompt-macro-table' },
             element('thead', {}, element('tr', {},
-                ...['宏', '适用任务', '用途', '格式'].map(text => element('th', { scope: 'col', text })))),
+                ...['宏', '名称', '用途', '格式'].map(text => element('th', { scope: 'col', text })))),
             element('tbody', {}, PROMPT_MACROS.map(macro => element('tr', {},
                 element('td', {}, element('code', { text: macro.token })),
-                element('td', { text: macro.tasks.map(taskLabel).join('、') }),
-                element('td', {}, element('strong', { text: macro.label }), element('p', { text: macro.description })),
+                element('td', { text: macro.label }),
+                element('td', { text: macro.description }),
                 element('td', { text: macro.format })))));
         const help = element('div', { class: 'wb-prompt-help-content' },
             element('section', { class: 'wb-prompt-help-section' },
                 element('h3', { text: '条目顺序与消息身份' }),
-                element('p', { text: '启用的条目按列表顺序提交。默认将“导演身份与职责”和“JSON 输出协议”分成两个独立条目。只有“最新已发送用户发言”使用 User，其余所有条目，包括最近 AI 回复和目录概括条目，均使用 System；已有模板首次加载时只迁移一次身份，不改变正文、开关或顺序，之后仍可编辑身份。所有输入资料都不能改变导演任务或输出协议，放在 System 资料条目中也不例外。部分原生模型接口会按自身要求转换消息身份。' }),
-                element('p', { text: '“剧情导演与资料统筹”用于试选和生成前调度；“目录概括”只用于 AI 展示概括，两套提示词与响应协议独立。修改条目、开关或顺序后，点击“保存提示词”会一并保存两套提示词。' })),
-            element('section', { class: 'wb-prompt-help-section' },
-                element('h3', { text: '导演与正文模型的分工' }),
-                element('p', { text: '导演完整决定本轮唯一的剧情主方向、事件因果、节点顺序和收束位置，先接住用户已表达的行动，再在世界书与角色设定内适度主动推进有依据的新事件。正文模型执行隐藏方案，负责文风、对白、动作、心理和其他表达细节，不另开剧情分支，也不向用户展示提纲。' }),
-                element('p', { text: '导演不能替用户角色作出尚未表达的决定，不能把世界书秘密当成角色已知。scene 只保存已经确认的事实，replyPlan 中尚未执行的事件不是场景记忆。generationType 为 continue 时，只接续当前 AI 回复，不重写开头或重复已完成节点。' })),
+                element('p', { text: '启用的条目按列表顺序发送。默认用 System 提供筛选职责、JSON 输出协议和数量预算，用 User 提供候选目录与聊天资料。资料不是指令；修改消息身份不会改变数据范围和返回校验。部分模型接口会按自身要求转换消息身份。' }),
+                element('p', { text: '这些提示词用于试运行和生成前调度，不用于编写正文，也不影响世界书库的 AI 整理。' })),
             element('section', { class: 'wb-prompt-help-section' },
                 element('h3', { text: '宏如何使用' }),
-                element('p', { text: '在正文中放置光标或选中一段文字，点击正文右上角的“插入宏”按钮，再从弹出的列表选择宏。也可以直接输入表中的完整宏名。列表只显示当前任务可用的宏。' }),
-                element('p', { text: '发送辅助请求时，宏会替换为本次数据，内容只展开一次。聊天、角色资料与世界书正文里的宏字符串会保留为原文，不会再次执行。' }),
-                element('p', { text: 'recentChat 仍是按设置读取的 AI 消息全文数组。最新用户发言由 latestUserMessage 独立提供；{{echo_latest_user_message}} 读取其中的 text，没有发言时为空，不占 AI 楼层，也不读取未发送草稿。{{echo_character_context}} 提供角色描述、性格、场景、用户人设和角色深度提示。' }),
-                element('p', { text: '文本宏提供原文，数字宏提供数值，JSON 宏提供完整对象或数组。JSON 宏可以单独放在一行，避免再用引号包住。完整导演输入 {{echo_selection_input}} 与分项宏同时使用时，会重复其中的资料。绿灯原文与 replyPlan 的 Token 预算分别约束；生成类型和方案预算都有独立宏。' })),
+                element('p', { text: '在提示词正文中放置光标或选中文字，点击“插入宏”，也可以直接输入表中的完整宏名。聊天、目录说明或关键词里的宏字符串仅作为资料发送，不会再次展开。' }),
+                element('p', { text: '{{echo_recent_chat}} 提供最近 AI 消息全文。{{echo_latest_user_message}} 独立提供最新已发送用户发言，没有发言时为 null，不占 AI 楼层，也不读取草稿。{{echo_candidate_entries}} 不含世界书正文。' }),
+                element('p', { text: 'JSON 宏可单独放在一行，不要再用引号包住。完整筛选输入 {{echo_selection_input}} 与分项宏并用会重复资料。' })),
             element('section', { class: 'wb-prompt-help-section' },
-                element('h3', { text: '必须保留的响应格式' }),
-                element('p', { text: '导演只返回一个 JSON 对象，必须有 selected 数组和 replyPlan 对象。selected 可为 []；每项必须提供候选中的完整原始 id、非空 reason；scope 可省略（默认 turn），提供时为 turn 或 scene。蓝灯和已纳入的固定绿灯不重复选择。scene 可省略；如提供，只写已确认事实。' }),
-                element('p', { text: 'replyPlan 的 direction、beats、constraints、ending、requiredEntryIds 全部必填。direction 和 ending 是非空字符串；beats 是 1～8 个非空字符串，按执行顺序排列；constraints 是 0～12 个非空字符串，可为 []；requiredEntryIds 是字符串数组，无必需世界书原文时可为 []。方案文字使用 replyPlanContentTokenBudget；replyPlanTokenBudget 约束整段深度 0 注入，包含固定指导与标记，也计入正文总上下文。超过时不截断，而是不采用方案。' }),
-                element('p', { text: 'requiredEntryIds 只列支撑方案不可缺少的世界书原文 ID，来源限本轮 blueEntries、已经纳入的 fixedGreenEntries 或本次 selected。ID 必须逐字复制，不拆成数组、不缩短、不编造；不得引用未知、未入选或未纳入的绿灯。依赖候选原文时先选入该条目，不能把原文转述进方案作为替代；预算不足时缩小方案。示例 ID 只是占位，实际必须来自本轮输入。' }),
-                element('pre', {}, element('code', { text: `{
-  "scene": "已确认的当前场景",
-  "selected": [{"id": "候选条目的完整原始 ID", "reason": "本轮事件因果与限制需要此原文", "scope": "scene"}],
-  "replyPlan": {
-    "direction": "接住用户行动，沿当前冲突推进一个有设定依据的新变化",
-    "beats": ["其他角色依据已知信息回应用户已经表达的行动", "呈现有因果依据的新变化，给用户回应机会"],
-    "constraints": ["不替用户作决定，不泄露角色尚未知晓的秘密，遵守所需世界书原文"],
-    "ending": "停在变化已经明确、需要用户决定如何回应的位置",
-    "requiredEntryIds": ["候选条目的完整原始 ID"]
-  }
-}` })),
-                element('p', { text: '目录概括仍只返回包含 summaries 数组的 JSON 对象，每项提供输入中的原始 id 和目录说明 text，不需要 replyPlan。两种响应都不要添加代码围栏、解释或故事正文。' }),
-                element('pre', {}, element('code', { text: '{"summaries":[{"id":"输入条目的原始 ID","text":"目录说明"}]}' }))),
+                element('h3', { text: '筛选响应格式' }),
+                element('p', { text: '返回一个只有 selected 的 JSON 对象。没有相关条目时返回空数组；入选条目按相关性排序，每项只填候选中逐字复制的完整 id、非空的简短 reason。不重复 ID、不选择蓝灯或固定绿灯，不添加其他字段、代码围栏、额外解释或正文。' }),
+                element('pre', {}, element('code', { text: '{"selected":[{"id":"候选条目的完整原始 ID","reason":"与当前行动涉及的地点限制直接相关"}]}' })),
+                element('p', { text: '不得超过剩余可选条目数。程序按入选条目的原文估算 Token，在剩余预算内纳入。' })),
             element('section', { class: 'wb-prompt-help-section' },
-                element('h3', { text: '旧模板升级与自定义内容' }),
-                element('p', { text: '兼容“最近聊天”版与“最近 AI 消息”版的旧默认文案：七个旧条目完整存在、旧规则正文未改写且保持已启用 System、尚无新版新增条目时，原位升级并加入独立 JSON 协议、角色约束和末尾用户发言；初始化时将识别到的升级保存到酒馆设置。未改写的旧任务条目补充生成类型与导演方案预算；已修改的任务或资料正文、名称、开关和原有相对顺序保留；消息身份按独立的一次性迁移处理，仅最新已发送用户发言为 User。' }),
-                element('p', { text: '已改写、关闭或变更消息身份的旧规则，以及删过旧条目的模板，不会被自动覆盖或补全。新版新增条目删除或关闭后，常规整理不会重新加回或启用。自定义旧模板需自行移除“禁止安排剧情”等与导演职责相冲突的旧规则，补充必填 replyPlan 协议、最新用户发言、角色上下文、生成类型和方案预算；也可使用已有的“恢复本任务默认”，检查草稿后保存。' })),
+                element('h3', { text: '旧模板升级' }),
+                element('p', { text: '旧版调度提示词的输入与返回格式不再兼容，升级时会换为新的筛选默认模板。此后可继续编辑、关闭、删除或调整条目顺序；常规加载不会补回被删除的条目。' })),
             element('section', { class: 'wb-prompt-help-section' },
                 element('h3', { text: '可用宏' }),
                 element('div', { class: 'wb-prompt-table-scroll' }, table)));

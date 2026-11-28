@@ -1,4 +1,4 @@
-import { MODULE } from './core.js';
+import { MODULE } from '../scheduler/core.js';
 
 export function normalizeAPIURL(value) {
     let url;

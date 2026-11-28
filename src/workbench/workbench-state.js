@@ -1,4 +1,4 @@
-import { MODULE } from './core.js';
+import { MODULE } from '../scheduler/core.js';
 
 export const WORKBENCH_SETTINGS = `${MODULE}-workbench`;
 export const THEMES = Object.freeze(['tavern', 'light', 'dark']);

@@ -5,12 +5,20 @@ import vm from 'node:vm';
 
 async function loadTransport(createGenerationParameters) {
     const context = vm.createContext({ AbortController, structuredClone, setTimeout, clearTimeout });
-    const source = await readFile(new URL('../transport.js', import.meta.url), 'utf8');
+    const source = await readFile(new URL('../src/api/transport.js', import.meta.url), 'utf8');
     const transport = new vm.SourceTextModule(source, { context });
     const dependency = new vm.SyntheticModule(['createGenerationParameters'], function () {
         this.setExport('createGenerationParameters', createGenerationParameters);
     }, { context });
-    await transport.link(() => dependency);
+    const connectionSource = await readFile(new URL('../src/api/api-connections.js', import.meta.url), 'utf8');
+    const connections = new vm.SourceTextModule(connectionSource, { context });
+    const core = new vm.SyntheticModule(['MODULE'], function () { this.setExport('MODULE', 'lorebook-director'); }, { context });
+    await transport.link(specifier => {
+        if (specifier.endsWith('/openai.js')) return dependency;
+        if (specifier === './api-connections.js') return connections;
+        if (specifier === '../scheduler/core.js') return core;
+        throw new Error(`Unexpected test import: ${specifier}`);
+    });
     await transport.evaluate();
     return transport.namespace.requestModel;
 }

@@ -1,0 +1,48 @@
+.wb-organize-body {
+    box-sizing: border-box;
+    width: min(100%, 76ch);
+    margin-inline: auto;
+    padding: var(--wb-gutter);
+    overflow-wrap: anywhere;
+}
+
+.wb-organize-title {
+    border-block-end: 1px solid var(--wb-border);
+    padding-block-end: 12px;
+    margin-block-end: 16px;
+}
+
+.wb-organize-title h2 { margin: 0 0 6px; }
+.wb-organize-preview { font-weight: 650; }
+.wb-organize-status:empty { display: none; }
+.wb-organize-error { margin-block: 14px 0; }
+
+.wb-organize-actions,
+.wb-organize-pages {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.wb-organize-actions { justify-content: flex-end; }
+.wb-organize-pages { margin-block: 12px; }
+.wb-organize-groups { border-block-end: 1px solid var(--wb-border); }
+.wb-organize-group { border-block-start: 1px solid var(--wb-border); }
+.wb-organize-group > summary { cursor: pointer; padding: 12px 2px; }
+.wb-organize-group > summary > span { display: block; margin-block-start: 3px; }
+.wb-organize-group-body { padding-inline: 12px 2px; padding-block-end: 12px; }
+.wb-organize-group-body ol { margin: 0; padding-inline-start: 24px; }
+.wb-organize-part { border-inline-start: 2px solid var(--wb-selection-border); padding-inline-start: 10px; }
+.wb-organize-part + .wb-organize-part { margin-block-start: 12px; }
+.wb-organize-part p { margin-block: 4px; }
+.wb-organize-slice { margin-block-start: 8px; }
+.wb-organize-slice > summary { cursor: pointer; color: var(--wb-accent); }
+.wb-organize-slice pre {
+    white-space: pre-wrap;
+    font: inherit;
+    padding: 10px;
+    background: var(--wb-soft);
+}
+
+.wb-book-organize-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }

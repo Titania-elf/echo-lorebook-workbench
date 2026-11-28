@@ -1,20 +1,19 @@
 // Pure selection/state logic. No SillyTavern or browser dependencies.
 // Persistent keys / UI IDs remain stable across the directory rename.
 import { normalizePromptTemplates } from './prompt-templates.js';
-import { validateReplyPlan } from './reply-plan.js';
-export { SELECTOR_SYSTEM, SUMMARY_SYSTEM } from './prompt-templates.js';
+export { SELECTOR_SYSTEM } from './prompt-templates.js';
 
 export const MODULE = 'lorebook-director';
 export const EXTENSION_NAME = 'echo-lorebook-workbench';
+export const ENTRY_TOKEN_OVERHEAD = 4;
 // Resolve the actual installation folder instead of coupling template paths to storage keys.
-export const EXTENSION_FOLDER = decodeURIComponent(new URL('.', import.meta.url).pathname.split('/').filter(Boolean).at(-1) || EXTENSION_NAME);
+export const EXTENSION_FOLDER = decodeURIComponent(new URL('../../', import.meta.url).pathname.split('/').filter(Boolean).at(-1) || EXTENSION_NAME);
 export const DEFAULTS = Object.freeze({
     enabled: false, books: [], profileId: '', maxEntries: 8, tokenBudget: 1800,
-    recentMessages: 3, replyPlanTokenBudget: 1000, timeoutSeconds: 60, summaries: {},
+    recentMessages: 3, timeoutSeconds: 60,
     apiMode: 'main', apiSchemeId: '', apiSchemes: [],
-    promptTemplates: normalizePromptTemplates(), promptRoleVersion: 1,
+    promptTemplates: normalizePromptTemplates(), promptRoleVersion: 2,
 });
-export const HISTORY_LIMIT = 16;
 
 export function settingsWithDefaults(value = {}) {
     const integer = (key, min, max) => {
@@ -22,16 +21,9 @@ export function settingsWithDefaults(value = {}) {
         return Number.isFinite(n) ? Math.min(max, Math.max(min, Math.round(n))) : DEFAULTS[key];
     };
     const storedRoleVersion = Number.isInteger(value.promptRoleVersion) && value.promptRoleVersion > 0 ? value.promptRoleVersion : 0;
-    const promptTemplates = normalizePromptTemplates(value.promptTemplates);
-    if (storedRoleVersion < DEFAULTS.promptRoleVersion) {
-        // One-time requested role migration; later edits in the role picker remain editable.
-        // Only mutate the normalized copies, never the stored prompts or their body/order/toggles.
-        for (const [task, entries] of Object.entries(promptTemplates)) {
-            for (const entry of entries) {
-                entry.role = task === 'selector' && entry.id === 'selector-latest-user' ? 'user' : 'system';
-            }
-        }
-    }
+    // Full-text/director templates used a different protocol, even when customized.
+    // Do not load their messages or roles into the directory-only selector.
+    const promptTemplates = normalizePromptTemplates(storedRoleVersion < DEFAULTS.promptRoleVersion ? undefined : value.promptTemplates);
     return {
         enabled: value.enabled === true,
         books: [...new Set((Array.isArray(value.books) ? value.books : []).filter(x => typeof x === 'string'))],
@@ -41,9 +33,8 @@ export function settingsWithDefaults(value = {}) {
         apiSchemeId: typeof value.apiSchemeId === 'string' ? value.apiSchemeId : '',
         apiSchemes: normalizeAPISchemes(value.apiSchemes),
         maxEntries: integer('maxEntries', 1, 30), tokenBudget: integer('tokenBudget', 128, 16000),
-        recentMessages: integer('recentMessages', 1, 30), replyPlanTokenBudget: integer('replyPlanTokenBudget', 128, 4000),
+        recentMessages: integer('recentMessages', 1, 30),
         timeoutSeconds: integer('timeoutSeconds', 10, 180),
-        summaries: value.summaries && typeof value.summaries === 'object' && !Array.isArray(value.summaries) ? value.summaries : {},
         promptTemplates, promptRoleVersion: Math.max(storedRoleVersion, DEFAULTS.promptRoleVersion),
     };
 }
@@ -118,30 +109,45 @@ export function injectionPosition(entry) {
     return entry.position === 0 ? 'before' : 'after';
 }
 
-export function makeCatalog(entries, books, summaries = {}, { applicable = () => true, sources = new Map() } = {}) {
+export function makeCatalog(entries, books, { applicable = () => true, cards = new Map() } = {}) {
     const managed = new Set(books);
     const seen = new Set();
-    return entries.filter(entry => {
+    const catalog = [];
+    for (const entry of entries) {
         if (!managed.has(entry.world) || entry.disable || entryKind(entry) === 'vector'
-            || !String(entry.content || '').trim() || !applicable(entry)) return false;
+            || !String(entry.content || '').trim() || !applicable(entry)) continue;
         const id = entryId(entry);
-        if (seen.has(id)) return false;
+        const card = cards.get(id);
+        if (!card || seen.has(id)) continue;
         seen.add(id);
-        return true;
-    }).map(entry => {
-        const id = entryId(entry);
-        const source = sources.get(id) || entry;
-        const fingerprint = sourceFingerprint(source);
-        const saved = summaries[id];
-        const hasSummary = saved?.fingerprint === fingerprint && typeof saved?.text === 'string' && saved.text.trim();
-        return {
-            id, entry, fingerprint, kind: entryKind(entry), position: injectionPosition(entry),
-            content: String(source.content || ''),
-            title: String(entry.comment || (Array.isArray(entry.key) ? entry.key : []).join('、') || `条目 ${entry.uid}`),
-            summary: hasSummary ? saved.text.slice(0, 400) : String(source.content).replace(/\s+/g, ' ').slice(0, 240),
-            summaryKind: hasSummary ? 'AI 概括' : '原文摘录',
-        };
-    });
+        const primary = Array.isArray(entry.key) ? entry.key.filter(key => typeof key === 'string') : [];
+        const secondary = Array.isArray(entry.keysecondary) ? entry.keysecondary.filter(key => typeof key === 'string') : [];
+        catalog.push({
+            id, entry, kind: entryKind(entry), position: injectionPosition(entry),
+            title: (typeof entry.comment === 'string' && entry.comment.trim() ? entry.comment : primary.join('、')) || `条目 ${entry.uid}`,
+            keywords: [...new Set([...primary, ...secondary])],
+            category: card.category, summary: card.summary, ancestors: card.ancestors,
+        });
+    }
+    return catalog;
+}
+
+/** Legacy pin/exclude rules follow split ancestry; "auto" exempts this entry only. */
+export function resolveOverride(overrides, id, ancestors = []) {
+    const direct = Object.hasOwn(overrides, id) ? overrides[id] : undefined;
+    if (direct === 'pin' || direct === 'exclude' || direct === 'auto') return direct;
+    if (!ancestors.length) return 'auto';
+    let world;
+    try { [world] = JSON.parse(id); }
+    catch { return 'auto'; }
+    if (typeof world !== 'string') return 'auto';
+    for (const uid of ancestors) {
+        const parent = entryId({ world, uid });
+        if (parent === id || !Object.hasOwn(overrides, parent)) continue;
+        const mode = overrides[parent];
+        if (mode === 'pin' || mode === 'exclude') return mode;
+    }
+    return 'auto';
 }
 
 export function parseJsonObject(text) {
@@ -153,32 +159,22 @@ export function parseJsonObject(text) {
     return parsed;
 }
 
-export function validateSelection(text, catalog, { requireReplyPlan = false, fixedEntries = [] } = {}) {
+export function validateSelection(text, catalog) {
     const data = parseJsonObject(text);
     if (!Array.isArray(data.selected)) throw new Error('筛选结果缺少 selected 数组。');
-    if (data.scene !== undefined && typeof data.scene !== 'string') throw new Error('场景说明必须是文本。');
-    const known = new Set(catalog.filter(item => item.kind !== 'blue' && item.kind !== 'vector').map(item => item.id));
+    const known = new Set(catalog.filter(item => item.kind === 'green').map(item => item.id));
     const seen = new Set();
     const selected = [];
     for (const item of data.selected) {
         if (!item || typeof item.id !== 'string' || !known.has(item.id)) {
-            throw new Error('模型返回了不在本轮目录中的条目 ID。');
+            throw new Error('模型返回了不在本轮候选目录中的条目 ID。');
         }
-        if (item.scope !== undefined && !['scene', 'turn'].includes(item.scope)) throw new Error('条目 scope 必须是 scene 或 turn。');
         if (typeof item.reason !== 'string' || !item.reason.trim()) throw new Error('筛选结果缺少条目的选择理由。');
         if (seen.has(item.id)) continue;
         seen.add(item.id);
-        selected.push({ id: item.id, scope: item.scope || 'turn', reason: item.reason.slice(0, 240) });
+        selected.push({ id: item.id, reason: item.reason.trim().slice(0, 240) });
     }
-    const result = { scene: (data.scene || '').slice(0, 800), selected };
-    if (requireReplyPlan || data.replyPlan !== undefined) {
-        result.replyPlan = validateReplyPlan(data.replyPlan, [
-            ...fixedEntries.map(item => typeof item === 'string' ? item : item.id),
-            ...catalog.filter(item => item.kind === 'blue').map(item => item.id),
-            ...selected.map(item => item.id),
-        ]);
-    }
-    return result;
+    return { selected };
 }
 
 export function historyChain(chat) {
@@ -189,72 +185,37 @@ export function historyChain(chat) {
     return hashes;
 }
 
-export function previousSnapshot(snapshots, chain) {
-    return (Array.isArray(snapshots) ? snapshots : [])
-        .filter(s => Number.isInteger(s.length) && s.length >= 0 && s.length < chain.length && chain[s.length] === s.hash)
-        .sort((a, b) => b.length - a.length || b.at - a.at)[0] || null;
-}
-
-export function recordSnapshot(snapshots, chat, result) {
-    const chain = historyChain(chat);
-    const snapshot = {
-        hash: chain.at(-1), length: chat.length, at: Date.now(), scene: result.scene,
-        selected: result.selected.filter(x => x.scope === 'scene').map(({ id, scope, reason }) => ({ id, scope, reason })),
-    };
-    const valid = (Array.isArray(snapshots) ? snapshots : [])
-        .filter(s => s.length < snapshot.length && s.length >= 0 && chain[s.length] === s.hash);
-    return [...valid, snapshot].slice(-HISTORY_LIMIT);
-}
-
 export function recentContext(chat, count) {
     return chat.filter(message => !message.is_user && !message.is_system && String(message.mes || '').trim()).slice(-count)
-        .map(message => ({ role: 'assistant', name: message.name || '', text: String(message.mes) }));
+        .map(message => ({ role: 'assistant', name: typeof message.name === 'string' ? message.name : '', text: String(message.mes) }));
 }
 
 export function latestUserContext(chat) {
     const message = chat.findLast(value => value.is_user && !value.is_system);
-    return message ? { role: 'user', name: message.name || '', text: String(message.mes || '') } : null;
+    return message ? { role: 'user', name: typeof message.name === 'string' ? message.name : '', text: String(message.mes || '') } : null;
 }
 
-export function selectorPayload(catalog, chat, previous, overrides, settings, pinned = [], {
-    generationType = 'normal', characterContext = {},
-} = {}) {
-    const card = item => ({
-        id: item.id, book: item.entry.world, title: item.title,
-        keywords: Array.isArray(item.entry.key) ? item.entry.key : [],
-        secondaryKeywords: Array.isArray(item.entry.keysecondary) ? item.entry.keysecondary : [],
-        content: item.content ?? String(item.entry.content || ''),
-        position: item.position || injectionPosition(item.entry),
-    });
-    const pinIds = new Set(pinned.map(item => item.id));
-    const green = catalog.filter(item => item.kind !== 'blue' && item.kind !== 'vector');
+/** Only the explicitly allowed directory fields leave the scheduler. */
+export function selectorPayload(candidates, chat, settings, fixed) {
     const recentChat = recentContext(chat, settings.recentMessages);
     return {
-        task: '担任本轮回复的幕后剧情导演兼设定统筹：根据最近 AI 回复、最新用户输入及世界书全文确定唯一主方向，允许设定范围内适度主动推进和引入新事件，并配齐支撑方案的绿灯原文；蓝灯和本轮已纳入的固定绿灯由程序加入。只规划本次回复，不替用户决定行动，不把安排记作事实。',
-        generationType, characterContext,
-        maxAdditionalGreenEntries: Math.max(0, settings.maxEntries - pinned.length),
-        greenTokenBudget: settings.tokenBudget,
-        replyPlanTokenBudget: settings.replyPlanTokenBudget ?? DEFAULTS.replyPlanTokenBudget,
-        history: { requested: settings.recentMessages, read: recentChat.length, fullText: true },
+        greenCandidates: candidates.filter(item => item.kind === 'green').map(item => ({
+            id: item.id, book: item.entry.world, title: item.title,
+            category: item.category, keywords: item.keywords, summary: item.summary,
+        })),
         recentChat, latestUserMessage: latestUserContext(chat),
-        previousScene: previous?.scene || '',
-        previousWorkingSet: (previous?.selected || []).filter(choice => choice.scope === 'scene' && green.some(item => item.id === choice.id)),
-        blueEntries: catalog.filter(item => item.kind === 'blue').map(card),
-        fixedGreenEntries: green.filter(item => pinIds.has(item.id)).map(card),
-        greenCandidates: green.filter(item => overrides[item.id] !== 'exclude' && overrides[item.id] !== 'pin').map(card),
+        maxAdditionalGreenEntries: Math.max(0, settings.maxEntries - fixed.selected.length),
+        remainingGreenTokenBudget: Math.max(0, settings.tokenBudget - fixed.tokens),
+        greenTokenBudget: settings.tokenBudget,
+        history: { requested: settings.recentMessages, read: recentChat.length },
     };
 }
 
 export async function allocateSelection(selection, catalog, overrides, settings, countTokens) {
-    const green = catalog.filter(item => item.kind !== 'blue' && item.kind !== 'vector');
+    const green = catalog.filter(item => item.kind === 'green');
     const byId = new Map(green.map(item => [item.id, item]));
-    const pins = green.filter(x => overrides[x.id] === 'pin').map(x => ({ id: x.id, scope: 'scene', reason: '本聊天手动固定' }));
-    const required = new Set(selection.replyPlan?.requiredEntryIds || []);
-    const candidates = [
-        ...pins,
-        ...selection.selected.filter(item => required.has(item.id)),
-        ...selection.selected.filter(item => !required.has(item.id)),
-    ];
+    const pins = green.filter(x => overrides[x.id] === 'pin').map(x => ({ id: x.id, reason: '本聊天手动固定' }));
+    const candidates = [...pins, ...selection.selected];
     const seen = new Set();
     const selected = [];
     const skipped = green.filter(item => overrides[item.id] === 'exclude')
@@ -268,7 +229,7 @@ export async function allocateSelection(selection, catalog, overrides, settings,
         }
         const rawCount = await countTokens(byId.get(choice.id).entry.content);
         if (!Number.isFinite(rawCount) || rawCount < 0) throw new Error('无法计算条目的 token 数量。');
-        const cost = Math.ceil(rawCount) + 4;
+        const cost = Math.ceil(rawCount) + ENTRY_TOKEN_OVERHEAD;
         if (selected.length >= settings.maxEntries || tokens + cost > settings.tokenBudget) {
             skipped.push({ ...choice, kind: 'green', tokens: cost, reason: selected.length >= settings.maxEntries ? '超过绿灯条目数量上限' : '超过绿灯 Token 预算（不截断原文）' });
             continue;
@@ -276,6 +237,6 @@ export async function allocateSelection(selection, catalog, overrides, settings,
         tokens += cost;
         selected.push({ ...choice, kind: 'green', position: injectionPosition(byId.get(choice.id).entry), tokens: cost });
     }
-    return { scene: selection.scene, selected, skipped, tokens };
+    return { selected, skipped, tokens };
 }
 

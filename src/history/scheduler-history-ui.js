@@ -1,7 +1,7 @@
-import { element, button } from './workbench-utils.js';
-import { scrollRegion } from './workbench-scroll.js';
+import { element, button } from '../workbench/workbench-utils.js';
+import { scrollRegion } from '../workbench/workbench-scroll.js';
 import { historyChatInfo } from './scheduler-history.js';
-import { replyPlanPresentation, replyPlanFields } from './scheduler-report.js';
+import { replyPlanPresentation, replyPlanFields } from '../scheduler/scheduler-report.js';
 
 const REQUEST_STATES = {
     pending: { label: '进行中', tone: 'active' },
@@ -98,7 +98,7 @@ function entryPresentation(record) {
     if (record.applicationStatus === 'applied' && effective) {
         return {
             snapshot: effective, effective: true, preliminary: false,
-            heading: '本次生效条目', note: '以酒馆世界书扫描接纳的条目 ID 为依据，不证明上游正文 API 已接收全部字符；导演方案状态另列。',
+            heading: '本次生效条目', note: '以酒馆世界书扫描接纳的条目 ID 为依据，不代表上游正文 API 已接收全部字符。',
         };
     }
     if (!planned) {
@@ -109,15 +109,15 @@ function entryPresentation(record) {
     }
     if (record.applicationStatus === 'applied') {
         return {
-            snapshot: planned, preliminary, heading: '本次计划条目',
-            note: `这条历史未记录实际生效条目标题。下方仅显示当时记录的计划。${preliminary ? '候选绿灯的最终入选情况尚未记录。' : ''}`,
+            snapshot: planned, preliminary, heading: '本次拟纳入条目',
+            note: `这条历史未记录实际接纳的条目标题。下方仅显示当时拟纳入的条目。${preliminary ? '候选绿灯的最终入选情况尚未记录。' : ''}`,
         };
     }
     if (record.applicationStatus === 'unused') {
         return {
             snapshot: planned, preliminary,
-            heading: preliminary ? '本次已准备条目（未采用）' : '本次计划条目（未采用）',
-            note: `本次调度未采用下方${preliminary ? '已准备的蓝灯和固定绿灯' : '计划'}。原生世界书是否生效，不能从这份调度计划判断。${preliminary ? '候选绿灯的最终入选情况尚未记录。' : ''}`,
+            heading: preliminary ? '本次已准备条目（未采用）' : '本次拟纳入条目（未采用）',
+            note: `本次调度未采用下方条目。无法从这份调度记录判断哪些条目由原生规则激活。${preliminary ? '候选绿灯的最终入选情况尚未记录。' : ''}`,
         };
     }
     if (preliminary) {
@@ -129,24 +129,24 @@ function entryPresentation(record) {
     if (record.kind === 'preview' || record.applicationStatus === 'preview') {
         return {
             snapshot: planned, preliminary: false, heading: '本次试运行条目',
-            note: '仅为手动导演试运行结果，未用于正文注入。',
+            note: '仅为手动试运行结果，未用于正文注入。',
         };
     }
     return {
-        snapshot: planned, preliminary: false, heading: '本次计划条目',
+        snapshot: planned, preliminary: false, heading: '本次拟纳入条目',
         note: record.applicationStatus === 'waiting'
-            ? '正在等待酒馆构造；下方计划尚未确认实际生效。'
-            : '下方是本次入选计划，实际生效条目尚未确认。',
+            ? '正在等待酒馆构造，尚未确认接纳条目。'
+            : '下方是拟纳入的条目，尚未确认实际接纳。',
     };
 }
 
 function emptyEntryText(kind, presentation) {
     const label = kind === 'blue' ? '蓝灯' : '绿灯';
-    if (presentation.effective) return `本次调度没有被酒馆构造接纳的${label}条目。${kind === 'green' ? '导演方案可独立处理，状态另列。' : ''}`;
+    if (presentation.effective) return `本次调度没有被酒馆构造接纳的${label}条目。`;
     if (presentation.preliminary) return kind === 'blue'
         ? '当前记录未包含已准备的蓝灯条目。'
         : '当前记录未包含已准备的固定绿灯；候选绿灯的最终入选情况尚未记录。';
-    return `当时记录的计划中没有${kind === 'green' ? '入选的' : ''}${label}条目。${kind === 'green' ? '无绿灯也可仅生成导演方案，方案状态独立显示。' : ''}`;
+    return `记录中没有拟纳入的${label}条目。`;
 }
 
 /** Reads browser-local history without replacing the response being examined. */
@@ -209,7 +209,7 @@ export class SchedulerHistoryUI {
         });
         this.search = element('input', {
             id: 'wb-history-search', type: 'search', autocomplete: 'off',
-            placeholder: '搜索模型、聊天、条目、导演方案或错误', 'aria-label': '搜索调度历史',
+            placeholder: '搜索模型、聊天、条目或错误', 'aria-label': '搜索调度历史',
         });
         this.search.addEventListener('input', () => {
             this.query = this.search.value.trim().toLocaleLowerCase();
@@ -240,7 +240,7 @@ export class SchedulerHistoryUI {
         });
         this.detailEmpty = element('div', { class: 'wb-empty wb-history-detail-empty' },
             element('strong', { text: '选择一条记录查看详情' }),
-            element('p', { class: 'wb-help', text: '这里会分别显示本轮采用、世界书接纳、隐藏导演方案状态与模型返回原文。' }));
+            element('p', { class: 'wb-help', text: '这里会显示请求状态、世界书接纳结果与模型返回原文。' }));
         this.facts = new Map();
         const factNodes = [
             ['chat', '来源聊天'], ['source', '触发方式'], ['scheme', 'API 方案'], ['model', '模型'],
@@ -260,8 +260,8 @@ export class SchedulerHistoryUI {
         this.planBody = element('dl', { class: 'wb-reply-plan-body' });
         this.planDisclaimer = element('p', { class: 'wb-help', text: '这是当时的拟议走向，不是已发生的场景事实；采用时用于隐藏的深度 0 System 指令，不生成可见聊天消息。依赖条目只是方案的要求，不表示已被构造接纳。' });
         this.planTokenNote = element('p', { class: 'wb-help', text: 'Token 数包含方案、执行提示、标记与消息开销，仍占正文上下文；预算不足时省略，不截断。' });
-        this.planSection = element('section', { class: 'wb-reply-plan wb-history-plan', 'aria-labelledby': 'wb-history-plan-title' },
-            element('div', { class: 'wb-reply-plan-heading' }, element('h4', { id: 'wb-history-plan-title', text: '导演方案' }), this.planStatus),
+        this.planSection = element('section', { class: 'wb-reply-plan wb-history-plan', 'aria-labelledby': 'wb-history-plan-title', hidden: true },
+            element('div', { class: 'wb-reply-plan-heading' }, element('h4', { id: 'wb-history-plan-title', text: '旧版导演方案' }), this.planStatus),
             this.planDisclaimer, this.planTokens, this.planTokenNote,
             this.planNote, this.planReason, this.planEmpty, this.planBody);
         this.entriesHeading = element('h4');
@@ -311,7 +311,7 @@ export class SchedulerHistoryUI {
         this.storageNotice = element('section', { class: 'wb-history-storage wb-error', role: 'status', hidden: true },
             element('strong', { text: '历史记录暂未能完整保存在浏览器' }), this.storageText);
         this.viewport = element('div', { class: 'wb-history-page' },
-            element('p', { class: 'wb-help', text: '查看当前浏览器保存的自动导演调度与手动试运行记录；世界书接纳与方案注入分别记录。' }),
+            element('p', { class: 'wb-help', text: '查看浏览器保存的目录筛选请求与世界书接纳结果。未调用筛选 API 的轮次不产生请求记录。' }),
             this.storageNotice, element('div', { class: 'wb-history-grid' }, listPanel, detailPanel));
         this.view = element('section', { class: 'wb-feature-view wb-history-view', 'data-history-detail': 'false' },
             scrollRegion(this.viewport, 'wb-fill-scroll'));
@@ -344,7 +344,7 @@ export class SchedulerHistoryUI {
             if (!this.query) return true;
             const snapshot = entryPresentation(record).snapshot;
             const titles = ['blue', 'green'].flatMap(kind => (snapshot?.[kind] || []).flatMap(entry => [entry.title, entry.book]));
-            const plan = replyPlanPresentation(record).plan;
+            const plan = replyPlanPresentation(record)?.plan;
             return [record.model, record.schemeName, record.chatName, record.error, record.applicationReason, record.replyPlanReason,
                 plan?.direction, plan?.ending, ...(plan?.beats || []), ...(plan?.constraints || []), ...(plan?.requiredEntryIds || []), ...titles]
                 .map(text).join('\n').toLocaleLowerCase().includes(this.query);
@@ -388,10 +388,12 @@ export class SchedulerHistoryUI {
             writeText(row.application, application || '');
             row.application.dataset.application = record.applicationStatus || '';
             row.application.hidden = !application;
-            const plan = replyPlanPresentation(record, { history: true });
-            writeText(row.plan, `导演：${plan.label}`);
-            row.plan.dataset.tone = plan.tone;
-            row.plan.hidden = !record.replyPlanStatus && !plan.plan;
+            const plan = replyPlanPresentation(record);
+            row.plan.hidden = !plan;
+            if (plan) {
+                writeText(row.plan, `旧版方案：${plan.label}`);
+                row.plan.dataset.tone = plan.tone;
+            }
             row.footer.hidden = row.chat.hidden && row.application.hidden && row.plan.hidden;
             const selected = record.id === this.selectedId;
             row.node.dataset.selected = String(selected);
@@ -415,7 +417,7 @@ export class SchedulerHistoryUI {
 
     renderEmpty(records, current) {
         let title = '暂无历史记录';
-        let description = '自动导演调度或手动试运行后，会在这里留下记录；没有托管条目也可只运行导演方案。';
+        let description = '自动调度或手动试运行调用筛选 API 后，会在这里留下请求记录。';
         if (this.loading && !records.length) {
             title = '正在读取历史记录…';
             description = '正在加载当前浏览器中的记录。';
@@ -489,12 +491,13 @@ export class SchedulerHistoryUI {
     }
 
     renderReplyPlan(record) {
-        const presentation = replyPlanPresentation(record, { history: true });
+        const presentation = replyPlanPresentation(record);
+        this.planSection.hidden = !presentation;
+        if (!presentation) return;
         writeText(this.planStatus, presentation.label);
         this.planStatus.dataset.tone = presentation.tone;
-        const hasTokens = typeof record.replyPlanTokens === 'number' && Number.isFinite(record.replyPlanTokens) && record.replyPlanTokens >= 0;
         writeText(this.planTokens, presentation.tokens);
-        this.planTokens.hidden = !hasTokens && !presentation.plan;
+        this.planTokens.hidden = !presentation.hasTokens && !presentation.plan;
         this.planTokenNote.hidden = this.planTokens.hidden;
         this.planDisclaimer.hidden = !presentation.plan;
         writeText(this.planNote, presentation.note);

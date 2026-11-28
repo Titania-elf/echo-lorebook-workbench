@@ -78,8 +78,7 @@ export class SchedulerScanGate {
     }
 
     matches(entries) {
-        return entries === this.scanEntries || entries.some(entry => this.owns(entry, 'mask'))
-            || (this.staged && !this.catalog.size && !this.scanEntries && !this.cancelled);
+        return entries === this.scanEntries || entries.some(entry => this.owns(entry, 'mask'));
     }
 
     restoreFields(entry, original, parsed = false) {

@@ -3,58 +3,13 @@ import {
     newWorldInfoEntryDefinition, world_info_position, world_info_logic,
     originalWIDataKeyMap, splitKeywordsAndRegexes,
     checkWorldInfo, world_info_include_names, world_info_max_recursion_steps,
-} from '../../../world-info.js';
-import { getCharaFilename } from '../../../utils.js';
-import { getTagKeyForEntity } from '../../../tags.js';
-import { promptManager } from '../../../openai.js';
-import { MODULE, entryId, entryVersion } from './core.js';
-import { clone } from './workbench-state.js';
-import { extension_prompt_types, extension_prompt_roles } from '../../../../script.js';
-import { replyPlanMarkers } from './reply-plan.js';
-
-const REPLY_PLAN_KEY = `${MODULE}-reply-plan`;
-const normalizedPromptText = value => String(value).replace(/\s+/g, ' ').trim();
-const escapeRegExp = value => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-
-function promptTexts(value, texts = []) {
-    if (typeof value === 'string') texts.push(normalizedPromptText(value));
-    else if (Array.isArray(value)) for (const item of value) promptTexts(item, texts);
-    else if (value && typeof value === 'object') {
-        for (const key of ['prompt', 'chat', 'content', 'text']) promptTexts(value[key], texts);
-    }
-    return texts;
-}
-
-const promptContains = (value, expected) => promptTexts(value).some(text => text.includes(expected));
-
-/** Remove only this generation's marked injection, retaining other prompts and media. */
-function stripPromptText(value, pattern) {
-    let changed = false;
-    if (Array.isArray(value)) {
-        for (let index = value.length - 1; index >= 0; index--) {
-            const item = value[index];
-            if (typeof item === 'string') {
-                const next = item.replace(pattern, '');
-                if (next !== item) { value[index] = next; changed = true; }
-                continue;
-            }
-            if (!stripPromptText(item, pattern)) continue;
-            changed = true;
-            const emptyMessage = item?.role && (typeof item.content === 'string' && !item.content.trim()
-                || Array.isArray(item.content) && !item.content.length);
-            const emptyPart = item?.type === 'text' && typeof item.text === 'string' && !item.text.trim();
-            if ((emptyMessage && !item.tool_calls?.length && !item.tool_call_id) || emptyPart) value.splice(index, 1);
-        }
-    } else if (value && typeof value === 'object') {
-        for (const key of ['prompt', 'chat', 'content', 'text']) {
-            if (typeof value[key] === 'string') {
-                const next = value[key].replace(pattern, '');
-                if (next !== value[key]) { value[key] = next; changed = true; }
-            } else if (value[key] && stripPromptText(value[key], pattern)) changed = true;
-        }
-    }
-    return changed;
-}
+} from '../../../../../world-info.js';
+import { getCharaFilename } from '../../../../../utils.js';
+import { getTagKeyForEntity } from '../../../../../tags.js';
+import { promptManager } from '../../../../../openai.js';
+import { MODULE, entryId, entryVersion } from '../scheduler/core.js';
+import { clone, sameValue } from '../workbench/workbench-state.js';
+import { readOrganizationIndex } from './organization-index.js';
 
 export class WorldbookError extends Error {
     constructor(message, { code = 'worldbook', uncertain = false, cause } = {}) {
@@ -132,7 +87,6 @@ export class NativeWorldbookAdapter {
         this.records = new Map();
         this.directoryLoaded = false;
         this.recovering = false;
-        this.replyPlanInjection = null;
         this.synchronizeOriginalData = synchronizeOriginalData;
     }
 
@@ -228,78 +182,6 @@ export class NativeWorldbookAdapter {
         return !decorators.includes('@@dont_activate') || decorators.includes('@@activate');
     }
 
-    schedulerCharacterContext() {
-        const context = this.getContext();
-        const fields = context.getCharacterCardFields?.() || {};
-        const result = { name: typeof context.name2 === 'string' ? context.name2 : '' };
-        for (const key of ['description', 'personality', 'scenario', 'persona', 'charDepthPrompt']) {
-            result[key] = typeof fields[key] === 'string' ? fields[key] : '';
-        }
-        return result;
-    }
-
-    assertSchedulerReplyPlanSlot(type) {
-        const context = this.getContext();
-        if (typeof context.setExtensionPrompt !== 'function' || !object(context.extensionPrompts)) {
-            throw new WorldbookError('当前酒馆没有可用的深度提示词注入接口。');
-        }
-        if (context.mainApi !== 'openai') return;
-        if (!promptManager) throw new WorldbookError('酒馆的正文预设尚未准备好。');
-        const prompt = promptManager.getPromptById('chatHistory');
-        if (!prompt || promptManager.isPromptDisabledForActiveCharacter('chatHistory')
-            || !promptManager.shouldTrigger(prompt, type)) {
-            throw new WorldbookError('正文预设中的“聊天历史”已关闭或不适用于本次生成，无法注入深度 0 导演方案。');
-        }
-    }
-
-    injectSchedulerReplyPlan(turn) {
-        const context = this.getContext();
-        const current = context.extensionPrompts?.[REPLY_PLAN_KEY];
-        const owned = this.replyPlanInjection;
-        if (owned?.turn === turn && current === owned.slot && current.value === turn.replyPlanPrompt) return;
-        if (current) throw new WorldbookError('导演方案的深度注入位置已被另一项操作修改，本轮不覆盖该内容。');
-        this.assertSchedulerReplyPlanSlot(turn.type);
-        context.setExtensionPrompt(REPLY_PLAN_KEY, turn.replyPlanPrompt,
-            extension_prompt_types.IN_CHAT, 0, false, extension_prompt_roles.SYSTEM);
-        const slot = context.extensionPrompts[REPLY_PLAN_KEY];
-        if (!slot || slot.value !== turn.replyPlanPrompt) throw new WorldbookError('酒馆没有保存本轮导演方案的深度注入。');
-        this.replyPlanInjection = { turn, slot };
-    }
-
-    clearSchedulerReplyPlan(turn = null) {
-        const owned = this.replyPlanInjection;
-        if (!owned || (turn && owned.turn !== turn)) return;
-        const context = this.getContext();
-        const slot = context.extensionPrompts?.[REPLY_PLAN_KEY];
-        if (slot === owned.slot && slot.value === owned.turn.replyPlanPrompt) delete context.extensionPrompts[REPLY_PLAN_KEY];
-        this.replyPlanInjection = null;
-    }
-
-    schedulerReplyPlanPresent(payload, turn) {
-        return Boolean(turn.replyPlanPrompt && promptContains(payload, normalizedPromptText(turn.replyPlanPrompt)));
-    }
-
-    schedulerReplyPlanMissingReferences(payload, turn) {
-        const available = turn.activeMap instanceof Map ? [...turn.activeMap.values()] : [];
-        const accepted = new Set(turn.acceptedIds(available));
-        const byId = new Map(available.filter(entry => accepted.has(entryId(entry))).map(entry => [entryId(entry), entry]));
-        const texts = promptTexts(payload);
-        return (turn.result.replyPlan?.requiredEntryIds || []).filter(id => {
-            const content = byId.get(id)?.content;
-            // Do not re-run worldbook regex/macros as a probe: they can have side effects.
-            // If the included original is not retained, its plan dependency is unconfirmed.
-            if (typeof content !== 'string' || !content.trim()) return true;
-            const expected = normalizedPromptText(content);
-            return !texts.some(text => text.includes(expected));
-        });
-    }
-
-    removeSchedulerReplyPlan(payload, turn) {
-        const { start, end } = replyPlanMarkers(turn.nonce);
-        const pattern = new RegExp(`${escapeRegExp(start)}[\\s\\S]*?${escapeRegExp(end)}`, 'g');
-        return stripPromptText(payload, pattern);
-    }
-
     assertSchedulerSlots(included, type) {
         if (this.getContext().mainApi !== 'openai' || !included.length) return;
         if (!promptManager) throw new WorldbookError('酒馆的正文预设尚未准备好。');
@@ -316,28 +198,35 @@ export class NativeWorldbookAdapter {
 
     /** Read disk without accepting it into the editor/cache; a failed native load is not an empty book. */
     async schedulerSnapshot(books, { signal } = {}) {
-        const mounted = this.schedulerBooks(books);
-        const sources = new Map();
-        if (!mounted.length) return { books: mounted, sources, versions: new Map() };
+        const mountedBooks = this.schedulerBooks(books);
+        const snapshot = { mountedBooks, books: [], unindexedBooks: [], cards: new Map(), versions: new Map() };
+        if (!mountedBooks.length) return snapshot;
         const records = await this.directory({ fresh: true, signal });
-        for (const name of mounted) {
+        for (const name of mountedBooks) {
             if (!records.some(record => record.name === name)) throw new WorldbookError(`托管世界书《${name}》已删除或改名。`);
         }
-        const saved = await Promise.all(mounted.map(async name => [
+        const saved = await Promise.all(mountedBooks.map(async name => [
             name, await this.readBook(name, { fresh: true, signal, requireExisting: false }),
         ]));
         for (const [world, data] of saved) {
+            const index = readOrganizationIndex(data);
+            if (!index) {
+                snapshot.unindexedBooks.push(world);
+                continue;
+            }
+            snapshot.books.push(world);
             for (const value of Object.values(data.entries)) {
                 if (!object(value) || !['string', 'number'].includes(typeof value.uid)) {
                     throw new WorldbookError(`《${world}》含有无法识别 ID 的条目，已跳过本轮调度。`);
                 }
-                const source = { ...value, world };
-                const id = entryId(source);
-                if (sources.has(id)) throw new WorldbookError(`《${world}》含有重复条目 ID，已跳过本轮调度。`);
-                sources.set(id, source);
+                const id = entryId({ world, uid: value.uid });
+                if (snapshot.versions.has(id)) throw new WorldbookError(`《${world}》含有重复条目 ID，已跳过本轮调度。`);
+                snapshot.versions.set(id, entryVersion(value));
+                const card = index.get(String(value.uid));
+                if (card) snapshot.cards.set(id, card);
             }
         }
-        return { books: mounted, sources, versions: new Map([...sources].map(([id, entry]) => [id, entryVersion(entry)])) };
+        return snapshot;
     }
 
     /**
@@ -460,6 +349,42 @@ export class NativeWorldbookAdapter {
 
     defaultValue(field) {
         return clone(this.definition[field]?.default);
+    }
+
+    async createOrganizationBackup(book, data, { signal } = {}) {
+        if (!object(data) || !object(data.entries)) throw new WorldbookError('原书格式异常，无法创建整理备份。', { code: 'backup_format' });
+        const original = clone(data);
+        const records = await this.directory({ fresh: true, signal });
+        const taken = new Set([String(book), ...records.map(record => record.name)].map(name => name.toLowerCase()));
+        if (!globalThis.crypto?.getRandomValues) throw new WorldbookError('无法生成安全的整理备份名称。', { code: 'backup_name' });
+        const time = new Date().toISOString().replace(/[-:.]/g, '').toLowerCase();
+        const prefix = 'echo-org-backup-';
+        const slug = String(book).normalize('NFKD').replace(/\p{M}/gu, '').replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-+|-+$/g, '').toLowerCase();
+        let name;
+        for (let attempt = 0; attempt < 5; attempt++) {
+            const random = globalThis.crypto.getRandomValues(new Uint8Array(12));
+            const nonce = Array.from(random, byte => byte.toString(16).padStart(2, '0')).join('');
+            const suffix = `-${time}-${nonce}`;
+            // Bound the entire ASCII filename, including the host-appended .json.
+            // Stay well below the filesystem's component limit for nested Windows paths.
+            const capacity = 96 - prefix.length - suffix.length - '.json'.length;
+            const label = slug.slice(0, capacity).replace(/-+$/g, '') || 'book';
+            const candidate = `${prefix}${label}${suffix}`;
+            if (!taken.has(candidate.toLowerCase())) { name = candidate; break; }
+        }
+        if (!name) throw new WorldbookError('找不到不冲突的整理备份名称。', { code: 'backup_name' });
+        try {
+            signal?.throwIfAborted();
+            // The native endpoint is an upsert; only use it for the unused random name.
+            const response = await this.request('edit', { name, data: original }, { signal, write: true });
+            if (response?.ok !== true) throw new Error('后台未确认写入。');
+            const saved = await this.readBook(name, { fresh: true, signal });
+            if (!sameValue(saved, original)) throw new Error('重新读取的完整备份与原书不同。');
+        } catch (cause) {
+            if (signal?.aborted) throw cause;
+            throw new WorldbookError(`整理备份《${name}》未能确认；原书未改动，请检查目录后重试。`, { code: 'backup_unverified', uncertain: true, cause });
+        }
+        return name;
     }
 
     async writeBook(name, data, { signal } = {}) {

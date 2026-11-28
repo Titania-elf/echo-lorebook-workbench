@@ -1,4 +1,4 @@
-import { clone, sameValue, contextKey, UID_LIMIT, bookWatermark, reserveBookWatermark } from './workbench-state.js';
+import { clone, sameValue, contextKey, UID_LIMIT, bookWatermark, reserveBookWatermark } from '../workbench/workbench-state.js';
 import { bookCategories, entryCategory, assignEntryCategory } from './book-categories.js';
 
 const object = value => value && typeof value === 'object' && !Array.isArray(value);
