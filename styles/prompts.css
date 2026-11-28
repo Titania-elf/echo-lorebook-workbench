@@ -219,6 +219,7 @@
 }
 
 #lorebook-director-workbench .wb-prompt-drag-handle:disabled {
+    touch-action: manipulation;
     cursor: not-allowed;
 }
 
@@ -467,9 +468,19 @@
     border-inline-end: 0;
 }
 
+/* The compact entry list scrolls with the page; only the text field keeps its own scroll range. */
 #lorebook-director-workbench[data-compact="true"] .wb-prompt-list-scroll {
     flex: 0 0 auto;
     max-height: none;
+    overflow: visible;
+}
+
+#lorebook-director-workbench[data-compact="true"] .wb-prompt-list-scroll > .wb-prompt-list {
+    overflow: visible;
+}
+
+#lorebook-director-workbench[data-compact="true"] .wb-prompt-text-scroll > .wb-prompt-text {
+    overscroll-behavior-y: auto;
 }
 
 #lorebook-director-workbench[data-compact="true"] .wb-prompt-back {
@@ -510,6 +521,15 @@
     #lorebook-director-workbench .wb-prompt-list-scroll {
         flex: 0 0 auto;
         max-height: none;
+        overflow: visible;
+    }
+
+    #lorebook-director-workbench .wb-prompt-list-scroll > .wb-prompt-list {
+        overflow: visible;
+    }
+
+    #lorebook-director-workbench .wb-prompt-text-scroll > .wb-prompt-text {
+        overscroll-behavior-y: auto;
     }
 
     #lorebook-director-workbench .wb-prompt-back {

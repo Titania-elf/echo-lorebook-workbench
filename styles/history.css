@@ -427,8 +427,19 @@
     border-inline-end: 0;
 }
 
+/* The compact record list scrolls with the page. Keep detail panes bounded, but let vertical scrolling reach the page. */
 #lorebook-director-workbench[data-compact="true"] .wb-history-list-scroll {
     max-height: none;
+    overflow: visible;
+}
+
+#lorebook-director-workbench[data-compact="true"] .wb-history-list-scroll > .wb-history-list {
+    overflow: visible;
+}
+
+#lorebook-director-workbench[data-compact="true"] .wb-history-entry-scroll > .wb-history-entry-list,
+#lorebook-director-workbench[data-compact="true"] .wb-history-response-section .wb-history-response {
+    overscroll-behavior-y: auto;
 }
 
 #lorebook-director-workbench[data-compact="true"] .wb-history-back {
@@ -453,6 +464,16 @@
 
     #lorebook-director-workbench .wb-history-list-scroll {
         max-height: none;
+        overflow: visible;
+    }
+
+    #lorebook-director-workbench .wb-history-list-scroll > .wb-history-list {
+        overflow: visible;
+    }
+
+    #lorebook-director-workbench .wb-history-entry-scroll > .wb-history-entry-list,
+    #lorebook-director-workbench .wb-history-response-section .wb-history-response {
+        overscroll-behavior-y: auto;
     }
 
     #lorebook-director-workbench .wb-history-back {
